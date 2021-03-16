@@ -1,8 +1,53 @@
 
 #include <Windows.h>
 
+#define local_persist static
+#define global_variable static
+#define internal static
+
+
+global_variable bool Running; //TODO: Placeholder, see day 003 https://youtu.be/GAi_nTx1zG8
+global_variable BITMAPINFO GlobalBitmapInfo;
+global_variable void *GlobalBitmapMemory;
+global_variable HBITMAP GlobalBitmapHandle;
+global_variable HDC BitmapDeviceContext;
+
+internal void
+Win32ResizeDIBSection(int Width, int Height)
+{
+    if(GlobalBitmapHandle)
+    {
+        DeleteObject(GlobalBitmapHandle);
+    }    
+    else
+    {
+        BitmapDeviceContext = CreateCompatibleDC(0);
+    }
+    // check on this from day 003 https://youtu.be/GAi_nTx1zG8
+    GlobalBitmapInfo.bmiHeader.biSize = sizeof(GlobalBitmapInfo.bmiHeader);
+    GlobalBitmapInfo.bmiHeader.biWidth = Width;
+    GlobalBitmapInfo.bmiHeader.biHeight = Height;
+    GlobalBitmapInfo.bmiHeader.biPlanes = 1;
+    GlobalBitmapInfo.bmiHeader.biBitCount = 32;
+    GlobalBitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+    GlobalBitmapHandle = CreateDIBSection(BitmapDeviceContext, &GlobalBitmapInfo, DIB_RGB_COLORS, &GlobalBitmapMemory, 0, 0);
+}
+
+internal void
+Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
+{
+    StretchDIBits(DeviceContext, 
+                X, Y, Width, Height, 
+                X, Y, Width, Height, 
+                GlobalBitmapMemory,
+                &GlobalBitmapInfo, 
+                DIB_RGB_COLORS, SRCCOPY);
+
+}
+
 LRESULT CALLBACK
-MainWindowCallback(HWND Window,
+Win32MainWindowCallback(HWND Window,
            UINT Message,
            WPARAM WParam,
            LPARAM LParam)
@@ -14,12 +59,21 @@ MainWindowCallback(HWND Window,
     {
         case WM_SIZE: 
         {
+            RECT ClientRect;
+            GetClientRect(Window, &ClientRect);
+            int Width = ClientRect.right - ClientRect.left;
+            int Height = ClientRect.bottom - ClientRect.top;
+            Win32ResizeDIBSection(Width, Height); 
         } break;
         case WM_DESTROY:
         {
+            //TODO: Placeholder, see day 003 https://youtu.be/GAi_nTx1zG8
+            Running = false;
         } break;
         case WM_CLOSE:
         {
+            //TODO: Placeholder, see day 003 https://youtu.be/GAi_nTx1zG8
+            Running = false;
         } break;
         case WM_ACTIVATEAPP:
         {
@@ -47,7 +101,7 @@ WinMain(HINSTANCE Instance,
 {
     WNDCLASSW WindowClass = {};
     WindowClass.style = CS_OWNDC|CS_VREDRAW|CS_HREDRAW;         // UINT        style;
-    WindowClass.lpfnWndProc = MainWindowCallback;               // WNDPROC     lpfnWndProc;
+    WindowClass.lpfnWndProc = Win32MainWindowCallback;               // WNDPROC     lpfnWndProc;
     WindowClass.hInstance = Instance;                           // HINSTANCE   hInstance;
 //    WindowClass.hIcon = ;                                     // HICON       hIcon;
     WindowClass.lpszClassName = (LPCWSTR)"Project21";           // LPCWSTR     lpszClassName;
@@ -70,7 +124,8 @@ WinMain(HINSTANCE Instance,
         if(WindowHandle)
         {
             MSG Message;
-            for(;;)
+            Running = true;
+            while(Running)
             {
                 BOOL MessageResult = GetMessageW(&Message, 0, 0, 0);
                 if (MessageResult > 0)
