@@ -4,6 +4,7 @@
 
 #include <Windows.h>
 #include <Xinput.h>
+#include <dsound.h>
 
 #define local_persist static
 #define global_variable static
@@ -40,11 +41,89 @@ X_INPUT_SET_STATE(XInputSetStateStub) { return(ERROR_DEVICE_NOT_CONNECTED); } //
 global_variable x_input_set_state *XInputSetState_;
 #define XInputSetState XInputSetState_
 
-global_variable bool Running;
+#define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter)
+typedef DIRECT_SOUND_CREATE(direct_sound_create);
+
+global_variable bool GlobalRunning;
 global_variable win32_offscreen_buffer GlobalBackbuffer;
+global_variable uint32_t GlobalAudioSamplesPerSecond;
 
 internal void
-Win32LoadXInput(void)
+Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t BufferSize)
+{
+    // load the library
+    HMODULE DirectSoundDLL = LoadLibraryW(L"dsound.dll");
+    if (DirectSoundDLL)
+    {       
+        // get a DS Object
+        direct_sound_create *DSCreate = (direct_sound_create *)GetProcAddress(DirectSoundDLL, "DirectSoundCreate");
+        LPDIRECTSOUND DS;
+
+        if (DSCreate && SUCCEEDED(DSCreate(0, &DS, 0)))
+        {
+            WAVEFORMATEX WaveFormat = {};
+            WaveFormat.wFormatTag = WAVE_FORMAT_PCM;
+            WaveFormat.nChannels = 2;
+            WaveFormat.nSamplesPerSec = SamplesPerSecond;
+            WaveFormat.wBitsPerSample = 16;
+            WaveFormat.nBlockAlign = (WaveFormat.nChannels * WaveFormat.wBitsPerSample) / 8;
+            WaveFormat.nAvgBytesPerSec = WaveFormat.nSamplesPerSec * WaveFormat.nBlockAlign;
+            WaveFormat.cbSize = 0;
+
+            if(SUCCEEDED(DS->SetCooperativeLevel(Window, DSSCL_PRIORITY)))
+            {
+                // create a primary buffer
+                LPDIRECTSOUNDBUFFER PrimaryBuffer;
+                DSBUFFERDESC BufferDesc = {};
+                BufferDesc.dwSize = sizeof(BufferDesc);
+                BufferDesc.dwFlags = DSBCAPS_PRIMARYBUFFER;
+                
+                if(SUCCEEDED(DS->CreateSoundBuffer(&BufferDesc, &PrimaryBuffer, 0)))
+                {
+                    if(SUCCEEDED(PrimaryBuffer->SetFormat(&WaveFormat)))
+                    {
+                        OutputDebugStringW(L"Primary Buffer Format Successfully Set!\n");
+                    } // SetFormat
+                    else
+                    {
+                        //TODO: Logging/error handling - unable to set format
+                    }                    
+
+                } // CreateSoundBuffer
+                else
+                {
+                    //TODO: Logging/error handling - unable to create primary buffer
+                }
+            } // SetCooperativeLevel
+            else
+            {
+                //TODO: Logging/error handling - unable to set cooperative level
+            }
+
+            LPDIRECTSOUNDBUFFER SecondaryBuffer;
+            DSBUFFERDESC BufferDesc = {};
+            BufferDesc.dwSize = sizeof(BufferDesc);
+            BufferDesc.dwBufferBytes = BufferSize;
+            BufferDesc.lpwfxFormat = &WaveFormat;
+            if(SUCCEEDED(DS->CreateSoundBuffer(&BufferDesc, &SecondaryBuffer, 0)))
+            {
+                OutputDebugStringW(L"Secondary Buffer Created Successfully!\n");
+            }
+            else
+            {
+                // Logging/error handling - unable to create secondary buffer
+            }
+        } // DSCreate
+        else
+        {
+            //TODO: Logging/error handling - bad pointer to function, or unable to create directsound object
+        }
+    }
+
+}
+
+internal void
+Win32InitializeXInput(void)
 {
     HMODULE XInputDLL = LoadLibraryW(XINPUT_DLL_W);
     if (XInputDLL)
@@ -141,12 +220,12 @@ Win32MainWindowCallback(HWND Window,
         case WM_DESTROY:
         {
             //TODO: Placeholder, see day 003 https://youtu.be/GAi_nTx1zG8
-            Running = false;
+            GlobalRunning = false;
         } break;
         case WM_CLOSE:
         {
             //TODO: Placeholder, see day 003 https://youtu.be/GAi_nTx1zG8
-            Running = false;
+            GlobalRunning = false;
         } break;
         case WM_ACTIVATEAPP:
         {
@@ -193,23 +272,23 @@ WinMain(HINSTANCE Instance,
         LPSTR CommandLine,
         int ShowCode)
 {
-    WNDCLASSW Window = {};
+    WNDCLASSW WindowClass = {};
 
-    Win32LoadXInput();
-    Win32InitializeBackBuffer(&GlobalBackbuffer, 1280, 720); 
+    Win32InitializeXInput();
+    Win32InitializeBackBuffer(&GlobalBackbuffer, 1280, 720);
 
-    Window.style = CS_VREDRAW|CS_HREDRAW;                  // UINT        style;
-    Window.lpfnWndProc = Win32MainWindowCallback;          // WNDPROC     lpfnWndProc;
-    Window.hInstance = Instance;                           // HINSTANCE   hInstance;
-//    Window.hIcon = ;                                     // HICON       hIcon;
-    Window.lpszClassName = (LPCWSTR)"Project21";           // LPCWSTR     lpszClassName;
+    WindowClass.style = CS_VREDRAW|CS_HREDRAW;                  // UINT        style;
+    WindowClass.lpfnWndProc = Win32MainWindowCallback;          // WNDPROC     lpfnWndProc;
+    WindowClass.hInstance = Instance;                           // HINSTANCE   hInstance;
+    //WindowClass.hIcon = ;                                     // HICON       hIcon;
+    WindowClass.lpszClassName = (LPCWSTR)"Project21";           // LPCWSTR     lpszClassName;
 
-    if(RegisterClassW(&Window))
+    if(RegisterClassW(&WindowClass))
     {
-        HWND WindowHandle = CreateWindowExW
+        HWND Window = CreateWindowExW
         (
             0,                              // DWORD dwExStyle,
-            Window.lpszClassName,           // LPCWSTR lpClassName,
+            WindowClass.lpszClassName,           // LPCWSTR lpClassName,
             (LPCWSTR)"Project21",           // LPCWSTR lpWindowName,
             WS_OVERLAPPEDWINDOW|WS_VISIBLE, // DWORD dwStyle,
             CW_USEDEFAULT,                  // int X,
@@ -221,23 +300,27 @@ WinMain(HINSTANCE Instance,
             Instance,                       // HINSTANCE hInstance,
             0                               // LPVOID lpParam
         );    
-        if(WindowHandle)
+        if(Window)
         {
+            HDC DeviceContext = GetDC(Window);
             MSG Message;
-            Running = true;
+            GlobalRunning = true;
+            GlobalAudioSamplesPerSecond = 48000;
             int tmpXOff = 0;
             int tmpYOff = 0;
-            HDC DeviceContext = GetDC(WindowHandle);
+
+            Win32InitializeDirectSound(Window, GlobalAudioSamplesPerSecond, 
+                                       GlobalAudioSamplesPerSecond * sizeof(int16_t) * 2);
 
             // MAIN LOOP
-            while(Running)
+            while(GlobalRunning)
             {
                 // Windows message loop
                 while(PeekMessageW(&Message, 0, 0, 0, PM_REMOVE))
                 {
                     if(Message.message == WM_QUIT)
                     {
-                        Running = false;
+                        GlobalRunning = false;
                     }
                     TranslateMessage(&Message);
                     DispatchMessageW(&Message);
@@ -284,7 +367,7 @@ WinMain(HINSTANCE Instance,
                 }
 
                 Win32RenderGradient(&GlobalBackbuffer, tmpXOff, tmpYOff);
-                win32_window_dim Dim = Win32GetWindowDimension(WindowHandle);
+                win32_window_dim Dim = Win32GetWindowDimension(Window);
                 Win32BackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, &GlobalBackbuffer,
                                         0, 0, Dim.Width, Dim.Height);
 
