@@ -46,7 +46,8 @@ typedef DIRECT_SOUND_CREATE(direct_sound_create);
 
 global_variable bool GlobalRunning;
 global_variable win32_offscreen_buffer GlobalBackbuffer;
-global_variable uint32_t GlobalAudioSamplesPerSecond;
+global_variable LPDIRECTSOUNDBUFFER GlobalSecondaryBuffer;
+
 
 internal void
 Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t BufferSize)
@@ -66,8 +67,8 @@ Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t Buffer
             WaveFormat.nChannels = 2;
             WaveFormat.nSamplesPerSec = SamplesPerSecond;
             WaveFormat.wBitsPerSample = 16;
-            WaveFormat.nBlockAlign = (WaveFormat.nChannels * WaveFormat.wBitsPerSample) / 8;
-            WaveFormat.nAvgBytesPerSec = WaveFormat.nSamplesPerSec * WaveFormat.nBlockAlign;
+            WaveFormat.nBlockAlign = (WaveFormat.nChannels*WaveFormat.wBitsPerSample) / 8;
+            WaveFormat.nAvgBytesPerSec = WaveFormat.nSamplesPerSec*WaveFormat.nBlockAlign;
             WaveFormat.cbSize = 0;
 
             if(SUCCEEDED(DS->SetCooperativeLevel(Window, DSSCL_PRIORITY)))
@@ -100,12 +101,11 @@ Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t Buffer
                 //TODO: Logging/error handling - unable to set cooperative level
             }
 
-            LPDIRECTSOUNDBUFFER SecondaryBuffer;
             DSBUFFERDESC BufferDesc = {};
             BufferDesc.dwSize = sizeof(BufferDesc);
             BufferDesc.dwBufferBytes = BufferSize;
             BufferDesc.lpwfxFormat = &WaveFormat;
-            if(SUCCEEDED(DS->CreateSoundBuffer(&BufferDesc, &SecondaryBuffer, 0)))
+            if(SUCCEEDED(DS->CreateSoundBuffer(&BufferDesc, &GlobalSecondaryBuffer, 0)))
             {
                 OutputDebugStringW(L"Secondary Buffer Created Successfully!\n");
             }
@@ -302,15 +302,24 @@ WinMain(HINSTANCE Instance,
         );    
         if(Window)
         {
+            GlobalRunning = true;
+
             HDC DeviceContext = GetDC(Window);
             MSG Message;
-            GlobalRunning = true;
-            GlobalAudioSamplesPerSecond = 48000;
-            int tmpXOff = 0;
-            int tmpYOff = 0;
+            uint32_t DSSampleIndex = 0;
+            int DSBytesPerSample = sizeof(int16_t)*2;
+            int DSSamplesPerSecond = 48000;
+            size_t DSBufferSize = DSSamplesPerSecond * DSBytesPerSample;            
 
-            Win32InitializeDirectSound(Window, GlobalAudioSamplesPerSecond, 
-                                       GlobalAudioSamplesPerSecond * sizeof(int16_t) * 2);
+            //local temporary/debug variables
+            int tmpXOff = 0;  //graphics test
+            int tmpYOff = 0;  //graphics test
+            int ToneVolume = 4096; //audio test
+            int ToneHz = 256;  //audio test
+            int ToneSamplesPerPeriod = DSSamplesPerSecond/ToneHz;  //audio test
+
+            Win32InitializeDirectSound(Window, DSSamplesPerSecond, DSBufferSize);
+            HRESULT Wtf = GlobalSecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
 
             // MAIN LOOP
             while(GlobalRunning)
@@ -367,6 +376,59 @@ WinMain(HINSTANCE Instance,
                 }
 
                 Win32RenderGradient(&GlobalBackbuffer, tmpXOff, tmpYOff);
+
+                // ************************** DIRECTSOUND TESTING ******************************
+                DWORD DSPlayCursor;
+                DWORD DSWriteCursor;
+                if(SUCCEEDED(GlobalSecondaryBuffer->GetCurrentPosition(&DSPlayCursor, &DSWriteCursor)))
+                {
+                    DWORD BytesToWrite;
+                    DWORD IndexToLock = DSSampleIndex*DSBytesPerSample % DSBufferSize;
+                    if (IndexToLock > DSPlayCursor)
+                    {
+                        BytesToWrite = DSBufferSize - IndexToLock;
+                        BytesToWrite += DSPlayCursor;
+                    }
+                    else
+                    {
+                        BytesToWrite = DSPlayCursor - IndexToLock;
+                    }
+
+                    VOID *DSRegion1;
+                    VOID *DSRegion2;
+                    DWORD DSRegion1Size;
+                    DWORD DSRegion2Size;
+                    if(SUCCEEDED(GlobalSecondaryBuffer->Lock(IndexToLock, BytesToWrite,
+                                                             &DSRegion1, &DSRegion1Size, 
+                                                             &DSRegion2, &DSRegion2Size,
+                                                             0)))
+                    {
+                        int16_t *SampleOut = (int16_t *)DSRegion1;
+                        DWORD Region1SampleCount = DSRegion1Size/DSBytesPerSample;
+                        for(DWORD SampleIndex = 0;
+                            SampleIndex < Region1SampleCount;
+                            ++SampleIndex)
+                        {
+                            int16_t SampleValue = ((DSSampleIndex++ / (ToneSamplesPerPeriod/2)) % 2) ? ToneVolume : -ToneVolume;
+                            *SampleOut++ = SampleValue;
+                            *SampleOut++ = SampleValue;
+                        }
+                        SampleOut = (int16_t *)DSRegion2;
+                        DWORD Region2SampleCount = DSRegion2Size/DSBytesPerSample;
+                        for(DWORD SampleIndex = 0;
+                            SampleIndex < Region2SampleCount;
+                            ++SampleIndex)
+                        {
+                            int16_t SampleValue = ((DSSampleIndex++ / (ToneSamplesPerPeriod/2)) % 2) ? ToneVolume : -ToneVolume;
+                            *SampleOut++ = SampleValue;
+                            *SampleOut++ = SampleValue;
+                        }
+                        GlobalSecondaryBuffer->Unlock(&DSRegion1, DSRegion1Size, &DSRegion2, DSRegion2Size);
+                    }
+                }
+
+// ************************** END DIRECTSOUND TESTING ******************************
+
                 win32_window_dim Dim = Win32GetWindowDimension(Window);
                 Win32BackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, &GlobalBackbuffer,
                                         0, 0, Dim.Width, Dim.Height);
