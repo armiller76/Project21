@@ -6,7 +6,7 @@
 			"label": "Call build.bat",
 			"command": "build.bat",
 			"options": {
-				"cwd": "${workspaceFolder}/build",
+				"cwd": "w:/build",
 				"shell": {
 					"executable": "cmd.exe",
 					"args": [
