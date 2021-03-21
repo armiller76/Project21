@@ -2,19 +2,21 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include <Windows.h>
-#include <Xinput.h>
-#include <dsound.h>
-#include <math.h> //TODO: you can do it
-
 #define local_persist static
 #define global_variable static
 #define internal static
 
 #define Pi32 3.14159265359f
 
-typedef float_t float32;
-typedef double_t float64;
+typedef float float32;
+typedef double float64;
+
+#include "project21.cpp"
+
+#include <Windows.h>
+#include <Xinput.h>
+#include <dsound.h>
+#include <math.h> //TODO: you can do it
 
 struct win32_offscreen_buffer
 {
@@ -43,9 +45,6 @@ struct win32_sound_output
     size_t BufferSize;
 };
 
-// rather than link with the entire xinput library, we will grab pointers to the functions instead
-// in a rather brilliant move, casey defines macros that, in turn, define function signatures,
-// which can be used to both declare the function pointers and crash-preventing stub functions.
 #define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
 typedef X_INPUT_GET_STATE(x_input_get_state);
 X_INPUT_GET_STATE(XInputGetStateStub) { return(ERROR_DEVICE_NOT_CONNECTED); } // stub function in case dll doesn't load
@@ -63,11 +62,11 @@ typedef DIRECT_SOUND_CREATE(direct_sound_create);
 
 global_variable bool GlobalRunning;
 global_variable win32_offscreen_buffer GlobalBackbuffer;
-global_variable LPDIRECTSOUNDBUFFER GlobalSecondaryBuffer;
+global_variable LPDIRECTSOUNDBUFFER GlobalAudioBuffer;
 
 
 internal void
-Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t BufferSize)
+Win32InitDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t BufferSize)
 {
     // load the library
     HMODULE DirectSoundDLL = LoadLibraryW(L"dsound.dll");
@@ -122,9 +121,9 @@ Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t Buffer
             BufferDesc.dwSize = sizeof(BufferDesc);
             BufferDesc.dwBufferBytes = BufferSize;
             BufferDesc.lpwfxFormat = &WaveFormat;
-            if(SUCCEEDED(DS->CreateSoundBuffer(&BufferDesc, &GlobalSecondaryBuffer, 0)))
+            if(SUCCEEDED(DS->CreateSoundBuffer(&BufferDesc, &GlobalAudioBuffer, 0)))
             {
-                OutputDebugStringW(L"Secondary Buffer Created Successfully!\n");
+                OutputDebugStringW(L"Audio Buffer Created Successfully!\n");
             }
             else
             {
@@ -140,7 +139,7 @@ Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t Buffer
 }
 
 internal void
-Win32InitializeXInput(void)
+Win32InitXInput(void)
 {
     HMODULE XInputDLL = LoadLibraryW(XINPUT_DLL_W);
     if (XInputDLL)
@@ -163,29 +162,7 @@ Win32GetWindowDimension(HWND Window)
 }
 
 internal void
-Win32RenderGradient(win32_offscreen_buffer *Buffer, int XOffset, int YOffset)
-{
-    // Renders a blue/green gradient pattern to a buffer. 
-    uint8_t *Row = (uint8_t *)Buffer->Memory;
-    for(int Y = 0;
-        Y < Buffer->Height;
-        ++Y)
-    {
-        uint32_t *Pixel = (uint32_t *)Row;
-        for(int X = 0;
-            X < Buffer->Width;
-            ++X)
-        {
-            uint8_t Blue = X + XOffset;
-            uint8_t Green = Y + YOffset;
-            *Pixel++ = ((Green << 8) | Blue);
-        }
-        Row += Buffer->Pitch;
-    }
-}
-
-internal void
-Win32InitializeBackBuffer(win32_offscreen_buffer *Buffer, int Width, int Height)
+Win32InitBackBuffer(win32_offscreen_buffer *Buffer, int Width, int Height)
 {
     //TODO: Consider returning bool
     if(Buffer->Memory)
@@ -227,7 +204,7 @@ Win32FillSoundBuffer(win32_sound_output *SoundOutput, DWORD ByteToLock, DWORD By
     VOID *BufferRegion2;
     DWORD Region1Size;
     DWORD Region2Size;
-    if(SUCCEEDED(GlobalSecondaryBuffer->Lock(ByteToLock, BytesToWrite,
+    if(SUCCEEDED(GlobalAudioBuffer->Lock(ByteToLock, BytesToWrite,
                                              &BufferRegion1, &Region1Size, 
                                              &BufferRegion2, &Region2Size,
                                              0)))
@@ -260,7 +237,7 @@ Win32FillSoundBuffer(win32_sound_output *SoundOutput, DWORD ByteToLock, DWORD By
             *SampleOut++ = SampleValue;
             ++SoundOutput->SampleIndex;
         }
-        GlobalSecondaryBuffer->Unlock(&BufferRegion1, Region1Size, &BufferRegion2, Region2Size);
+        GlobalAudioBuffer->Unlock(&BufferRegion1, Region1Size, &BufferRegion2, Region2Size);
     }
 }
 
@@ -333,10 +310,16 @@ WinMain(HINSTANCE Instance,
         LPSTR CommandLine,
         int ShowCode)
 {
+    LARGE_INTEGER PerfCountFrequency_;
+    QueryPerformanceFrequency(&PerfCountFrequency_);
+    int64_t PerfCountFrequency = PerfCountFrequency_.QuadPart;
+
+    uint64_t LastCycleCount = __rdtsc();
+
     WNDCLASSW WindowClass = {};
 
-    Win32InitializeXInput();
-    Win32InitializeBackBuffer(&GlobalBackbuffer, 1280, 720);
+    Win32InitXInput();
+    Win32InitBackBuffer(&GlobalBackbuffer, 1280, 720);
 
     WindowClass.style = CS_VREDRAW|CS_HREDRAW;                  // UINT        style;
     WindowClass.lpfnWndProc = Win32MainWindowCallback;          // WNDPROC     lpfnWndProc;
@@ -349,7 +332,7 @@ WinMain(HINSTANCE Instance,
         HWND Window = CreateWindowExW
         (
             0,                              // DWORD dwExStyle,
-            WindowClass.lpszClassName,           // LPCWSTR lpClassName,
+            WindowClass.lpszClassName,      // LPCWSTR lpClassName,
             (LPCWSTR)"Project21",           // LPCWSTR lpWindowName,
             WS_OVERLAPPEDWINDOW|WS_VISIBLE, // DWORD dwStyle,
             CW_USEDEFAULT,                  // int X,
@@ -363,28 +346,29 @@ WinMain(HINSTANCE Instance,
         );    
         if(Window)
         {
-            GlobalRunning = true;
-
-            //local temporary/debug variables
+            // temporary/debug variables
             int tmpXOff = 0;  //graphics test
             int tmpYOff = 0;  //graphics test
 
             // sound test: init DirectSound, fill buffer w/ sine wave, and play
-            HDC DeviceContext = GetDC(Window);
-            MSG Message;
             win32_sound_output SoundOutput = {};
-            SoundOutput.SampleIndex = 0;
             SoundOutput.BytesPerSample = sizeof(int16_t)*2;
             SoundOutput.SamplesPerSecond = 48000;
-            SoundOutput.BufferSize = SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample;            
             SoundOutput.ToneVol = 4096;
             SoundOutput.ToneHz = 256;
-            SoundOutput.WavePeriod = SoundOutput.SamplesPerSecond/SoundOutput.ToneHz;
-            Win32InitializeDirectSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.BufferSize);
+            SoundOutput.BufferSize = SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample;            
+            SoundOutput.WavePeriod = SoundOutput.SamplesPerSecond / SoundOutput.ToneHz;
+            Win32InitDirectSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.BufferSize);
             Win32FillSoundBuffer(&SoundOutput, 0, SoundOutput.BufferSize);
-            GlobalSecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
+            GlobalAudioBuffer->Play(0, 0, DSBPLAY_LOOPING);
 
             // MAIN LOOP
+            GlobalRunning = true;
+            HDC DeviceContext = GetDC(Window);
+            MSG Message;
+            LARGE_INTEGER LastPerfCount;
+            QueryPerformanceCounter(&LastPerfCount);
+
             while(GlobalRunning)
             {
                 // Windows message loop
@@ -438,18 +422,24 @@ WinMain(HINSTANCE Instance,
                     }
                 }
 
-                Win32RenderGradient(&GlobalBackbuffer, tmpXOff, tmpYOff);
+                offscreen_buffer Buffer = {};
+                Buffer.Memory = GlobalBackbuffer.Memory;
+                Buffer.Width = GlobalBackbuffer.Width;
+                Buffer.Height = GlobalBackbuffer.Height;
+                Buffer.Pitch = GlobalBackbuffer.Pitch;
+                ApplicationUpdate(&Buffer, 0, 0);
+                //RenderGradient(&GlobalBackbuffer, tmpXOff, tmpYOff);
 
                 // ************************** DIRECTSOUND TESTING ******************************
                 DWORD PlayCursor;
                 DWORD WriteCursor;
-                if(SUCCEEDED(GlobalSecondaryBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor)))
+                if(SUCCEEDED(GlobalAudioBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor)))
                 {
                     // this needs an update to use shorter latency (now, we write all the way to play cursor, probably explaining
                     // the tick, but if we only write maybe 25% there's less chance of over/underlap?)
                     DWORD BytesToWrite;
                     DWORD IndexToLock = (SoundOutput.SampleIndex*SoundOutput.BytesPerSample) % SoundOutput.BufferSize;
-                    if (IndexToLock == PlayCursor)
+                    if (IndexToLock == PlayCursor) //TODO: This _should_ never happen, because the buffer should be playing. Maybe assert that?
                     {
                         BytesToWrite = 0;
                     }
@@ -471,7 +461,21 @@ WinMain(HINSTANCE Instance,
                 Win32BackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, &GlobalBackbuffer,
                                         0, 0, Dim.Width, Dim.Height);
 
+                uint64_t EndCycleCount = __rdtsc();
+                LARGE_INTEGER EndPerfCount;
+                QueryPerformanceCounter(&EndPerfCount);
+
+                uint64_t CyclesElapsed = EndCycleCount - LastCycleCount;
+                int64_t PerfCountElapsed = EndPerfCount.QuadPart - LastPerfCount.QuadPart;
+                int32_t mSecLastFrame = (int32_t)((1000*PerfCountElapsed) / PerfCountFrequency);
+                int32_t MCyclesLastFrame = (int32_t)(CyclesElapsed / (1000 * 1000));
+                char DebugBuffer[256];
+                wsprintfW((LPWSTR)DebugBuffer, L"Last frame: %dms, %d Mcycles\n", mSecLastFrame, MCyclesLastFrame);
+                OutputDebugStringW((LPWSTR)DebugBuffer);
+
                 tmpXOff += 1;
+                LastPerfCount = EndPerfCount;
+                LastCycleCount = EndCycleCount;
             }
         }
         else
