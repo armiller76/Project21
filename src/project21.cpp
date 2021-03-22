@@ -42,9 +42,31 @@ RenderGradient(application_offscreen_buffer *Buffer, int XOffset, int YOffset)
 }
 
 internal void
-ApplicationUpdate(application_offscreen_buffer *Buffer, int32_t BlueOffset, int32_t GreenOffset, 
-                  application_sound_output_buffer *SoundBuffer, int32_t ToneHz)
+ApplicationUpdate(application_offscreen_buffer *BitmapBuffer, 
+                  application_sound_output_buffer *SoundBuffer,
+                  application_input *Input)
 {
+    local_persist int32_t BlueOffset = 0;
+    local_persist int32_t GreenOffset = 0;
+    local_persist int32_t ToneHz = 256;
+
+    input_controller *Input0 = &Input->Controllers[0];
+    if(Input0->IsAnalog)
+    {
+        // Use analog movement tuning
+        ToneHz = 256 + (int32_t)(128.0f*(Input0->LEndY));
+        BlueOffset -= (int32_t)4.0f*(Input0->LEndX);
+    }
+    else
+    {
+        // Use digital movement tuning
+    }
+
+    if(Input0->Down.EndedDown)
+    {
+        GreenOffset += 1;
+    }
+
     ApplicationOutputSound(SoundBuffer, ToneHz);
-    RenderGradient(Buffer, BlueOffset, GreenOffset);
+    RenderGradient(BitmapBuffer, BlueOffset, GreenOffset);
 }
