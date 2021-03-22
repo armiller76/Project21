@@ -1,7 +1,5 @@
 #ifndef WIN32_NEWPROJECT21_H
 
-#define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
-
 struct win32_offscreen_buffer
 {
     BITMAPINFO BitmapInfo;

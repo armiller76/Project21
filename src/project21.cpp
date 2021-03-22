@@ -41,21 +41,36 @@ RenderGradient(application_offscreen_buffer *Buffer, int XOffset, int YOffset)
     }
 }
 
+internal application_state *ApplicationStartup(void)
+{
+    application_state Result = {};
+    Result.ToneHz = 256;
+    Result.BlueOffset = Result.GreenOffset = 0;
+    return(&Result);
+}
+
 internal void
-ApplicationUpdate(application_offscreen_buffer *BitmapBuffer, 
+ApplicationUpdate(application_memory *Memory,
+                  application_offscreen_buffer *BitmapBuffer, 
                   application_sound_output_buffer *SoundBuffer,
                   application_input *Input)
 {
-    local_persist int32_t BlueOffset = 0;
-    local_persist int32_t GreenOffset = 0;
-    local_persist int32_t ToneHz = 256;
+    Assert(sizeof(application_state) <= Memory->PermanentStorageSize);
+    
+    application_state *State = (application_state *)Memory->PermanentStorage;
+    if (!Memory->ApplicationIsInitialized)
+    {
+        State->ToneHz = 256;
+
+        Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
+    }
 
     input_controller *Input0 = &Input->Controllers[0];
     if(Input0->IsAnalog)
     {
         // Use analog movement tuning
-        ToneHz = 256 + (int32_t)(128.0f*(Input0->LEndY));
-        BlueOffset -= (int32_t)4.0f*(Input0->LEndX);
+        State->ToneHz = 256 + (int32_t)(128.0f*(Input0->LEndY));
+        State->BlueOffset -= (int32_t)4.0f*(Input0->LEndX);
     }
     else
     {
@@ -64,9 +79,9 @@ ApplicationUpdate(application_offscreen_buffer *BitmapBuffer,
 
     if(Input0->Down.EndedDown)
     {
-        GreenOffset += 1;
+        State->GreenOffset += 1;
     }
 
-    ApplicationOutputSound(SoundBuffer, ToneHz);
-    RenderGradient(BitmapBuffer, BlueOffset, GreenOffset);
+    ApplicationOutputSound(SoundBuffer, State->ToneHz);
+    RenderGradient(BitmapBuffer, State->BlueOffset, State->GreenOffset);
 }

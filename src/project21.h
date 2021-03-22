@@ -1,5 +1,33 @@
 #ifndef PROJECT21_H
 
+/*
+
+    PROJECT21_INTERNAL:
+        0 - public release
+        1 - internal build
+    
+    PROJECT21_SLOW:
+        0 - no slow code!
+        1 - slow code okay/encouraged
+
+
+
+*/
+
+
+#define Kilobytes(Value) ((Value)*1024LL)
+#define Megabytes(Value) (Kilobytes(Value)*1024LL)
+#define Gigabytes(Value) (Megabytes(Value)*1024LL)
+#define Terabytes(Value) (Gigabytes(Value)*1024LL)
+
+#define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
+
+#if PROJECT21_SLOW
+#define Assert(Expression) if(!(Expression)) { *(int *)0 = 0; }
+#else
+#define Assert(Expression)
+#endif
+
 struct application_offscreen_buffer 
 {
     void *Memory;
@@ -25,6 +53,7 @@ struct input_controller
 {
     bool32 IsAnalog;
     
+    //TODO: Consider an analog-stick struct?
     float32 LStartX;
     float32 LStartY;
     float32 LMinX;
@@ -60,15 +89,45 @@ struct input_controller
     };
 };
 
+struct application_clocks
+{
+    //TODO: add clocks to application_input
+    float32 SecondsElapsed;
+}
+
 struct application_input
 {
+    //TODO: add clocks here
     input_controller Controllers[4];
 };
 
-internal void ApplicationUpdate(application_offscreen_buffer *Buffer, 
+
+struct application_memory
+{
+    bool32 ApplicationIsInitialized;
+    uint64_t PermanentStorageSize;
+    uint64_t TransientStorageSize;
+    
+    //IMPORTANT: MUST BE CLEARED TO ZERO AT STARTUP!
+    void *PermanentStorage;
+
+    //IMPORTANT: MUST BE CLEARED TO ZERO AT STARTUP!
+    void *TransientStorage;
+};
+
+
+internal void ApplicationUpdate(application_memory *Memory,
+                                application_offscreen_buffer *Buffer, 
                                 application_sound_output_buffer *SoundBuffer,
                                 application_input *Input);
 
+// this does not need to be visible to Win32....
+struct application_state
+{
+    int32_t ToneHz;
+    int32_t BlueOffset;
+    int32_t GreenOffset;
+};
 
 #define PROJECT21_H
 #endif
