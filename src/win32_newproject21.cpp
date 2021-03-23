@@ -1,7 +1,6 @@
 
 #include <math.h> // currenly only using sinf - can I do better / as well?
 #include <stdint.h>
-#include <stddef.h>
 
 #define local_persist static
 #define global_variable static
@@ -15,8 +14,9 @@ typedef int32_t bool32;
 
 #include "project21.cpp"
 
-#include <malloc.h>
 #include <Windows.h>
+#include <stdio.h>
+#include <malloc.h>
 #include <Xinput.h>
 #include <dsound.h>
 
@@ -40,6 +40,88 @@ typedef DIRECT_SOUND_CREATE(direct_sound_create);
 global_variable bool GlobalRunning;
 global_variable win32_offscreen_buffer GlobalBackbuffer;
 global_variable LPDIRECTSOUNDBUFFER GlobalAudioBuffer;
+
+internal internal_read_file_result
+INTERNALPlatformReadEntireFile(char *FileName)
+{
+    internal_read_file_result Result = {};
+
+    HANDLE FileHandle = CreateFileA(FileName, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    if(FileHandle != INVALID_HANDLE_VALUE)
+    {
+        LARGE_INTEGER FileSize;
+        if(GetFileSizeEx(FileHandle, &FileSize))
+        {
+            //TODO: ReadFile can only read 0xFFFFFFFF bytes. For now that's fine.
+            uint32_t FileSize32 = SafeTruncateUInt64(FileSize.QuadPart);
+            Result.Contents = VirtualAlloc(0, FileSize32, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+            if(Result.Contents)
+            {
+                DWORD BytesRead;
+                if(ReadFile(FileHandle, Result.Contents, FileSize32, &BytesRead, 0) && (BytesRead == FileSize32))
+                {
+                    Result.Size = FileSize32;
+                }
+                else // ReadFile failed
+                {
+                    //TODO: Logging
+                    INTERNALPlatformFreeFileMemory(Result.Contents);
+                    Result.Contents = 0;
+                }
+            }
+            else // couldn't get memory
+            {
+                //TODO: Logging/Error handling
+            }
+        }
+        else // couldn't get file size
+        {
+            //TODO: Logging/Error handling
+        }
+        CloseHandle(FileHandle);
+    } 
+    else // couldn't get file handle
+    {
+        //TODO: Logging/Error handling
+    }
+
+    return(Result);
+}
+
+internal void 
+INTERNALPlatformFreeFileMemory(void *Memory)
+{
+    if(Memory)
+    {
+        VirtualFree(Memory, 0, MEM_RELEASE);
+    }
+}
+
+internal bool32 
+INTERNALPlatformWriteEntireFile(char *FileName, uint32_t MemorySize, void *Memory)
+{
+    bool32 Result = false;
+
+    HANDLE FileHandle = CreateFileA(FileName, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+    if(FileHandle != INVALID_HANDLE_VALUE)
+    {
+        DWORD BytesWritten;
+        if(WriteFile(FileHandle, Memory, MemorySize, &BytesWritten, 0))
+        {
+            Result = (BytesWritten == MemorySize);    
+        }
+        else // WriteFile failed
+        {
+            //TODO: Logging/Error handling
+        }
+        CloseHandle(FileHandle);
+    } 
+    else // couldn't get file handle
+    {
+        //TODO: Loggin/Error handling
+    }
+    return(Result);
+}
 
 internal void
 Win32InitDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t BufferSize)

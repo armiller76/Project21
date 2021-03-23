@@ -1,19 +1,25 @@
 #ifndef PROJECT21_H
 
 /*
-
     PROJECT21_INTERNAL:
         0 - public release
         1 - internal build
     
     PROJECT21_SLOW:
         0 - no slow code!
-        1 - slow code okay/encouraged
-
-
-
+        1 - slow code okay/expected
 */
 
+/*********************/
+/*     Utilities     */
+/*********************/
+
+
+#if PROJECT21_SLOW
+#define Assert(Expression) if(!(Expression)) { *(int *)0 = 0; }
+#else
+#define Assert(Expression)
+#endif
 
 #define Kilobytes(Value) ((Value)*1024LL)
 #define Megabytes(Value) (Kilobytes(Value)*1024LL)
@@ -22,11 +28,32 @@
 
 #define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
 
-#if PROJECT21_SLOW
-#define Assert(Expression) if(!(Expression)) { *(int *)0 = 0; }
-#else
-#define Assert(Expression)
+inline uint32_t
+SafeTruncateUInt64(uint64_t Value)
+{
+    Assert(Value < 0xFFFFFFFF);
+    return((uint32_t)Value);
+}
+
+/**************************************************************/
+/*Services that the platform layer provides to the application*/
+/**************************************************************/
+
+#if PROJECT21_INTERNAL
+struct internal_read_file_result
+{
+    uint32_t Size;
+    void *Contents;
+};
+internal internal_read_file_result INTERNALPlatformReadEntireFile(char *Filename);
+internal void INTERNALPlatformFreeFileMemory(void *Bitmapmemory);
+internal bool32 INTERNALPlatformWriteEntireFile(char *Filename, uint32_t MemorySize, void *Memory);
 #endif
+
+
+/**************************************************************/
+/*Services that the application provides to the platform layer*/
+/**************************************************************/
 
 struct application_offscreen_buffer 
 {
@@ -93,7 +120,7 @@ struct application_clocks
 {
     //TODO: add clocks to application_input
     float32 SecondsElapsed;
-}
+};
 
 struct application_input
 {

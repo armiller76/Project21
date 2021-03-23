@@ -60,6 +60,18 @@ ApplicationUpdate(application_memory *Memory,
     application_state *State = (application_state *)Memory->PermanentStorage;
     if (!Memory->ApplicationIsInitialized)
     {
+        
+// file IO testing ///////////////////////////////////////////////////////////        
+        char *FileName = __FILE__;
+        internal_read_file_result File = INTERNALPlatformReadEntireFile(FileName);
+        if(File.Contents)
+        {
+            INTERNALPlatformWriteEntireFile("test.out", File.Size, File.Contents);
+            INTERNALPlatformFreeFileMemory(File.Contents);
+        }
+// file IO testing ///////////////////////////////////////////////////////////                
+        
+        
         State->ToneHz = 256;
 
         Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
