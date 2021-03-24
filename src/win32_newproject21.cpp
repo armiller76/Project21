@@ -124,7 +124,7 @@ INTERNALPlatformWriteEntireFile(char *FileName, uint32_t MemorySize, void *Memor
 }
 
 internal void
-Win32InitDirectSound(HWND Window, uint32_t SamplesPerSecond, size_t BufferSize)
+Win32InitDirectSound(HWND Window, uint32_t SamplesPerSecond, uint32_t BufferSize)
 {
     // load the library
     HMODULE DirectSoundDLL = LoadLibraryW(L"dsound.dll");
@@ -207,7 +207,7 @@ Win32ClearSoundBuffer(win32_sound_output *SoundOutput)
     if(SUCCEEDED(GlobalAudioBuffer->Lock(0, SoundOutput->BufferSize,
                                              &BufferRegion1, &Region1Size, 
                                              &BufferRegion2, &Region2Size,
-                                             0)))
+                                            0)))
     {
         uint8_t *DestSample = (uint8_t *)BufferRegion1;
         for (DWORD ByteIndex = 0; ByteIndex < Region1Size; ++ByteIndex)
@@ -362,7 +362,7 @@ Win32MainWindowCallback(HWND Window,
         case WM_KEYDOWN:
         case WM_KEYUP:
         {
-            uint32_t VKCode = WParam;
+            uint32_t VKCode = (uint32_t)WParam;
             bool32 WasDown = ((LParam & (1 << 30)) != 0);
             bool32 IsDown = ((LParam & (1 << 31)) == 0);
             if(WasDown != IsDown)
@@ -508,7 +508,7 @@ WinMain(HINSTANCE Instance,
 #endif
             application_memory ApplicationMemory = {};
             ApplicationMemory.PermanentStorageSize = Megabytes(64);
-            ApplicationMemory.TransientStorageSize = Gigabytes((uint64_t)4);
+            ApplicationMemory.TransientStorageSize = Gigabytes(1);
             uint64_t TotalMemorySize = ApplicationMemory.PermanentStorageSize + ApplicationMemory.TransientStorageSize;
             
             ApplicationMemory.PermanentStorage = VirtualAlloc(BaseAddress, TotalMemorySize, 
@@ -537,13 +537,83 @@ WinMain(HINSTANCE Instance,
                         {
                             GlobalRunning = false;
                         }
-                        TranslateMessage(&Message);
-                        DispatchMessageW(&Message);
-                    }
 
+                        switch(Message.message)
+                        {
+                            case WM_SYSKEYDOWN:
+                            case WM_SYSKEYUP:
+                            case WM_KEYDOWN:
+                            case WM_KEYUP:
+                            {
+                                uint32_t VKCode = (uint32_t)Message.wParam;
+                                bool32 WasDown = ((Message.lParam & (1 << 30)) != 0);
+                                bool32 IsDown = ((Message.lParam & (1 << 31)) == 0);
+                                if(WasDown != IsDown)
+                                {
+                                    if(VKCode == 'W')
+                                    {
+                                    }
+                                    else if(VKCode == 'A')
+                                    {
+                                    }
+                                    else if(VKCode == 'S')
+                                    {
+                                    }
+                                    else if(VKCode == 'D')
+                                    {
+                                    }
+                                    else if(VKCode == 'Q')
+                                    {
+                                    }
+                                    else if(VKCode == 'E')
+                                    {
+                                    }
+                                    else if(VKCode == VK_UP)
+                                    {
+                                    }
+                                    else if(VKCode == VK_LEFT)
+                                    {
+                                    }
+                                    else if(VKCode == VK_DOWN)
+                                    {
+                                    }
+                                    else if(VKCode == VK_RIGHT)
+                                    {
+                                    }
+                                    else if(VKCode == VK_ESCAPE)
+                                    {
+                                        OutputDebugStringA("ESCAPE: ");
+                                        if(IsDown)
+                                        {
+                                            OutputDebugStringA("IsDown ");
+                                        }
+                                        if(WasDown)
+                                        {
+                                            OutputDebugStringA("WasDown");
+                                        }
+                                        OutputDebugStringA("\n");
+                                    }
+                                    else if(VKCode == VK_SPACE)
+                                    {
+                                    }
+                                }
+                                bool32 AltKeyWasDown = (Message.lParam & (1 << 29));
+                                if((VKCode == VK_F4) && AltKeyWasDown)
+                                {
+                                    GlobalRunning = false;
+                                }
+                            } break;
+
+                            default:
+                            {
+                                TranslateMessage(&Message);
+                                DispatchMessageW(&Message);
+                            }
+                        } // switch(Message.message)
+                    } // while(PeekMessage)
                     // Controller/Keyboard loop
                     //TODO: Poll more frequently?
-                    int32_t MaxControllerCount = XUSER_MAX_COUNT;
+                    uint32_t MaxControllerCount = XUSER_MAX_COUNT;
                     if(MaxControllerCount > ArrayCount(NewAppInput->Controllers))
                     {
                         MaxControllerCount = ArrayCount(NewAppInput->Controllers);
@@ -635,7 +705,7 @@ WinMain(HINSTANCE Instance,
                         {
                             //TODO: Logging/UI? - Controller not available / unplugged / error
                         }
-                    }
+                    } // Controller processing
 
                     application_offscreen_buffer ApplicationOffscreenBuffer = {};
                     ApplicationOffscreenBuffer.Memory = GlobalBackbuffer.Memory;

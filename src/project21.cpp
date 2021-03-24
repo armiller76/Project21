@@ -33,14 +33,15 @@ RenderGradient(application_offscreen_buffer *Buffer, int XOffset, int YOffset)
             X < Buffer->Width;
             ++X)
         {
-            uint8_t Blue = X + XOffset;
-            uint8_t Green = Y + YOffset;
+            uint8_t Blue = (uint8_t)(X + XOffset);
+            uint8_t Green = (uint8_t)(Y + YOffset);
             *Pixel++ = ((Green << 8) | Blue);
         }
         Row += Buffer->Pitch;
     }
 }
 
+#if 0
 internal application_state *ApplicationStartup(void)
 {
     application_state Result = {};
@@ -48,6 +49,7 @@ internal application_state *ApplicationStartup(void)
     Result.BlueOffset = Result.GreenOffset = 0;
     return(&Result);
 }
+#endif
 
 internal void
 ApplicationUpdate(application_memory *Memory,
@@ -82,7 +84,7 @@ ApplicationUpdate(application_memory *Memory,
     {
         // Use analog movement tuning
         State->ToneHz = 256 + (int32_t)(128.0f*(Input0->LEndY));
-        State->BlueOffset -= (int32_t)4.0f*(Input0->LEndX);
+        State->BlueOffset -= (int32_t)(4.0f*(Input0->LEndX));
     }
     else
     {
