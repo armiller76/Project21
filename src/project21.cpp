@@ -41,6 +41,12 @@ RenderGradient(application_offscreen_buffer *Buffer, int XOffset, int YOffset)
     }
 }
 
+inline application_input_device *GetController(application_input *Input, uint32_t ControllerIndex)
+{
+    Assert(ControllerIndex < ArrayCount(Input->Controllers));
+    return(&Input->Controllers[ControllerIndex]);
+}
+
 #if 0
 internal application_state *ApplicationStartup(void)
 {
@@ -79,21 +85,40 @@ ApplicationUpdate(application_memory *Memory,
         Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
     }
 
-    input_controller *Input0 = &Input->Controllers[0];
-    if(Input0->IsAnalog)
+    for(uint32_t ControllerIndex = 0;
+                 ControllerIndex < ArrayCount(Input->Controllers);
+                 ++ControllerIndex)
     {
-        // Use analog movement tuning
-        State->ToneHz = 256 + (int32_t)(128.0f*(Input0->LEndY));
-        State->BlueOffset -= (int32_t)(4.0f*(Input0->LEndX));
-    }
-    else
-    {
-        // Use digital movement tuning
-    }
+        application_input_device *Controller = GetController(Input, ControllerIndex);
+        if(Controller->IsAnalog)
+        {
+            // Use analog movement tuning
+            State->ToneHz = 256 + (int32_t)(128.0f*(Controller->LStickAverageY));
+            State->BlueOffset -= (int32_t)(4.0f*(Controller->LStickAverageX));
+        }
+        else
+        {
+            // Use digital movement tuning
+            if(Controller->MoveRight.EndedDown)
+            {
+                --State->BlueOffset;
+            }
 
-    if(Input0->Down.EndedDown)
-    {
-        State->GreenOffset += 1;
+            if(Controller->MoveLeft.EndedDown)
+            {
+                ++State->BlueOffset;
+            }
+
+            if(Controller->MoveUp.EndedDown)
+            {
+                ++State->GreenOffset;
+            }
+
+            if(Controller->MoveDown.EndedDown)
+            {
+                --State->GreenOffset;
+            }
+        }
     }
 
     ApplicationOutputSound(SoundBuffer, State->ToneHz);

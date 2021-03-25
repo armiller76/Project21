@@ -76,40 +76,33 @@ struct button_state
     bool32 EndedDown;
 };
 
-struct input_controller
+struct application_input_device
 {
     bool32 IsAnalog;
-    
-    //TODO: Consider an analog-stick struct?
-    float32 LStartX;
-    float32 LStartY;
-    float32 LMinX;
-    float32 LMinY;
-    float32 LMaxX;
-    float32 LMaxY;
-    float32 LEndX;
-    float32 LEndY;
-
-    float32 RStartX;
-    float32 RStartY;
-    float32 RMinX;
-    float32 RMinY;
-    float32 RMaxX;
-    float32 RMaxY;
-    float32 REndX;
-    float32 REndY;
-    
+    bool32 IsConnected;
+    float32 LStickAverageX;
+    float32 LStickAverageY;
+    float32 RStickAverageX;
+    float32 RStickAverageY;
+    float32 LTriggerAverage;
+    float32 RTriggerAverage;
     union
     {
-        button_state Buttons[8];
+        button_state Buttons[14];
         struct
         {
-            button_state Up;
-            button_state Down;
-            button_state Left;
-            button_state Right;
+            button_state MoveUp;
+            button_state MoveDown;
+            button_state MoveLeft;
+            button_state MoveRight;
+            button_state ActionUp;
+            button_state ActionDown;
+            button_state ActionLeft;
+            button_state ActionRight;
             button_state LeftShoulder;
             button_state RightShoulder;
+            button_state LeftTrigger;
+            button_state RightTrigger;
             button_state Start;
             button_state Back;
         };
@@ -125,9 +118,8 @@ struct application_clocks
 struct application_input
 {
     //TODO: add clocks here
-    input_controller Controllers[4];
+    application_input_device Controllers[5]; // Controller 0 = Keyboard, 1-4 = other XInput devices
 };
-
 
 struct application_memory
 {
