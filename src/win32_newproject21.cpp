@@ -804,21 +804,23 @@ WinMain(HINSTANCE Instance,
                     application_input *Temp = NewInput;
                     NewInput = OldInput;
                     OldInput = Temp;
-#if 0                    
-                    float64 MSPerFrame = (((1000.0f*(float64)WorkSecondsElapsed) / (float64)GlobalPerformanceCounterFrequency));
-                    float64 FPS = (float64)GlobalPerformanceCounterFrequency / (float64)WorkSecondsElapsed;
-                    float64 MCPF = ((float64)CyclesElapsed / (1000.0f * 1000.0f));
 
-                    char DebugBuffer[256];
-                    wsprintfW((LPWSTR)DebugBuffer, L"%.02fms/f,  %.02ff/s,  %.02fmc/f\n", MSPerFrame, FPS, MCPF);
-                    OutputDebugStringW((LPWSTR)DebugBuffer);
-#endif
                     LARGE_INTEGER EndPerformanceCounter = Win32GetWallClock();
+                    float64 MSPerFrame = 1000.0f*Win32GetSecondsElapsed(LastPerformanceCounter, EndPerformanceCounter);
                     LastPerformanceCounter = EndPerformanceCounter;
 
                     uint64_t EndCycleCount = __rdtsc();
                     uint64_t CyclesElapsed = EndCycleCount - LastCycleCount;
                     LastCycleCount = EndCycleCount;
+
+                    float64 FPS = (float64)GlobalPerformanceCounterFrequency / (float64)WorkSecondsElapsed;
+                    float64 MCPF = ((float64)CyclesElapsed / (1000.0f * 1000.0f));
+#if 0                    
+                    char DebugBuffer[256];
+                    sprintf_s((LPWSTR)DebugBuffer, L"%.02fms/f,  %.02ff/s,  %.02fmc/f\n", MSPerFrame, FPS, MCPF);
+                    OutputDebugStringW((LPWSTR)DebugBuffer);
+#endif
+
                 } // while(GlobalRunning)
             }
             else // Either audio buffer pointer or app memory pointer or transient memory pointer are borked
