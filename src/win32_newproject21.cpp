@@ -40,9 +40,25 @@ typedef DIRECT_SOUND_CREATE(direct_sound_create);
 global_variable bool GlobalRunning;
 global_variable win32_offscreen_buffer GlobalBackbuffer;
 global_variable LPDIRECTSOUNDBUFFER GlobalAudioBuffer;
+global_variable int64_t GlobalPerformanceCounterFrequency;
+
+inline LARGE_INTEGER
+Win32GetWallClock()
+{
+    LARGE_INTEGER Result;
+    QueryPerformanceCounter(&Result);
+    return(Result);
+}
+
+inline float32
+Win32GetSecondsElapsed(LARGE_INTEGER Start, LARGE_INTEGER End)
+{
+    float32 Result = (float32)(End.QuadPart - Start.QuadPart) / GlobalPerformanceCounterFrequency;
+    return(Result);
+}
 
 internal internal_read_file_result
-INTERNALPlatformReadEntireFile(char *FileName)
+INTERNAL_PlatformReadEntireFile(char *FileName)
 {
     internal_read_file_result Result = {};
 
@@ -65,7 +81,7 @@ INTERNALPlatformReadEntireFile(char *FileName)
                 else // ReadFile failed
                 {
                     //TODO: Logging
-                    INTERNALPlatformFreeFileMemory(Result.Contents);
+                    INTERNAL_PlatformFreeFileMemory(Result.Contents);
                     Result.Contents = 0;
                 }
             }
@@ -89,7 +105,7 @@ INTERNALPlatformReadEntireFile(char *FileName)
 }
 
 internal void 
-INTERNALPlatformFreeFileMemory(void *Memory)
+INTERNAL_PlatformFreeFileMemory(void *Memory)
 {
     if(Memory)
     {
@@ -98,7 +114,7 @@ INTERNALPlatformFreeFileMemory(void *Memory)
 }
 
 internal bool32 
-INTERNALPlatformWriteEntireFile(char *FileName, uint32_t MemorySize, void *Memory)
+INTERNAL_PlatformWriteEntireFile(char *FileName, uint32_t MemorySize, void *Memory)
 {
     bool32 Result = false;
 
@@ -135,7 +151,7 @@ Win32GetWindowDimension(HWND Window)
 }
 
 internal void
-Win32InitXInput(void)
+Win32InitializeXInput(void)
 {
     HMODULE XInputDLL = LoadLibraryW(XINPUT_DLL_W);
     if (XInputDLL)
@@ -147,7 +163,7 @@ Win32InitXInput(void)
 }
 
 internal void
-Win32InitBackBuffer(win32_offscreen_buffer *Buffer, int Width, int Height)
+Win32InitializeBackbuffer(win32_offscreen_buffer *Buffer, int Width, int Height)
 {
     //TODO: Consider returning bool
     if(Buffer->Memory)
@@ -160,7 +176,6 @@ Win32InitBackBuffer(win32_offscreen_buffer *Buffer, int Width, int Height)
     Buffer->BytesPerPixel = 4;
     Buffer->Pitch = Buffer->Width * Buffer->BytesPerPixel;
 
-    // check on this from day 003 https://youtu.be/GAi_nTx1zG8
     Buffer->BitmapInfo.bmiHeader.biSize = sizeof(Buffer->BitmapInfo.bmiHeader);
     Buffer->BitmapInfo.bmiHeader.biWidth = Buffer->Width;
     Buffer->BitmapInfo.bmiHeader.biHeight = -Buffer->Height; // negative height specifies top-down DIB (top-left origin)
@@ -173,7 +188,7 @@ Win32InitBackBuffer(win32_offscreen_buffer *Buffer, int Width, int Height)
 }
 
 internal void
-Win32InitDirectSound(HWND Window, uint32_t SamplesPerSecond, uint32_t BufferSize)
+Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, uint32_t BufferSize)
 {
     // load the library
     HMODULE DirectSoundDLL = LoadLibraryW(L"dsound.dll");
@@ -310,7 +325,7 @@ Win32FillSoundBuffer(win32_sound_output *SoundOutput, DWORD ByteToLock, DWORD By
 }
 
 internal void
-Win32BackbufferToWindow(HDC DeviceContext, int WindowWidth, int WindowHeight, win32_offscreen_buffer *Buffer, int X, int Y, int Width, int Height)
+Win32CopyBackbufferToWindow(HDC DeviceContext, int WindowWidth, int WindowHeight, win32_offscreen_buffer *Buffer, int X, int Y, int Width, int Height)
 {
     StretchDIBits(DeviceContext, 
                   0, 0, Buffer->Width, Buffer->Height, 
@@ -497,7 +512,7 @@ Win32MainWindowCallback(HWND Window,
             PAINTSTRUCT Paint;
             win32_window_dim Dim = Win32GetWindowDimension(Window);
             HDC DeviceContext = BeginPaint(Window, &Paint);
-            Win32BackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, 
+            Win32CopyBackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, 
                                 &GlobalBackbuffer, 
                                 Paint.rcPaint.left, Paint.rcPaint.top,
                                 Paint.rcPaint.right - Paint.rcPaint.left, 
@@ -519,23 +534,32 @@ WinMain(HINSTANCE Instance,
         LPSTR CommandLine,
         int ShowCode)
 {
-    LARGE_INTEGER PerfCountFrequency_;
-    QueryPerformanceFrequency(&PerfCountFrequency_);
-    int64_t PerfCountFrequency = PerfCountFrequency_.QuadPart;
+    LARGE_INTEGER PerformanceCounterFrequency;
+    QueryPerformanceFrequency(&PerformanceCounterFrequency);
+    GlobalPerformanceCounterFrequency = PerformanceCounterFrequency.QuadPart;
 
     uint64_t LastCycleCount = __rdtsc();
 
+    // force windows to 1ms scheduler granularity so framerate sleep is more accurate
+    UINT DesiredWindowsSchedulerTiming = 1; //millisecond
+    MMRESULT RequestResult = timeBeginPeriod(DesiredWindowsSchedulerTiming);
+    bool32 SleepIsGranular = (RequestResult == TIMERR_NOERROR);
+
+    Win32InitializeXInput();
+    Win32InitializeBackbuffer(&GlobalBackbuffer, 1280, 720);
+
     WNDCLASSW WindowClass = {};
-
-    Win32InitXInput();
-    Win32InitBackBuffer(&GlobalBackbuffer, 1280, 720);
-
     WindowClass.style = CS_VREDRAW|CS_HREDRAW;                  // UINT        style;
     WindowClass.lpfnWndProc = Win32MainWindowCallback;          // WNDPROC     lpfnWndProc;
     WindowClass.hInstance = Instance;                           // HINSTANCE   hInstance;
     //WindowClass.hIcon = ;                                     // HICON       hIcon;
     WindowClass.lpszClassName = (LPCWSTR)"Project21";           // LPCWSTR     lpszClassName;
 
+    //TODO: find a reliable way to get this from windows...
+    uint32_t MonitorRefreshRate = 60;
+    uint32_t GameUpdateHz = MonitorRefreshRate / 2; 
+    float32 TargetSecondsElapsedPerFrame = 1.0f / (float32)GameUpdateHz;
+    
     if(RegisterClassW(&WindowClass))
     {
         HWND Window = CreateWindowExW
@@ -551,8 +575,7 @@ WinMain(HINSTANCE Instance,
             0,                              // HWND hWndParent,
             0,                              // HMENU hMenu,
             Instance,                       // HINSTANCE hInstance,
-            0                               // LPVOID lpParam
-        );    
+            0);                             // LPVOID lpParam
         if(Window)
         {
             // temporary/debug variables
@@ -565,7 +588,7 @@ WinMain(HINSTANCE Instance,
             SoundOutput.SamplesPerSecond = 48000;
             SoundOutput.LatencySampleCount = SoundOutput.SamplesPerSecond / 15;
             SoundOutput.BufferSize = SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample;            
-            Win32InitDirectSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.BufferSize);
+            Win32InitializeDirectSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.BufferSize);
             Win32ClearSoundBuffer(&SoundOutput);
             GlobalAudioBuffer->Play(0, 0, DSBPLAY_LOOPING);
 
@@ -595,8 +618,7 @@ WinMain(HINSTANCE Instance,
                 // MAIN LOOP
                 GlobalRunning = true;
                 HDC DeviceContext = GetDC(Window);
-                LARGE_INTEGER LastPerfCount;
-                QueryPerformanceCounter(&LastPerfCount);
+                LARGE_INTEGER LastPerformanceCounter = Win32GetWallClock();
 
                 while(GlobalRunning)
                 {
@@ -753,8 +775,28 @@ WinMain(HINSTANCE Instance,
                         Win32FillSoundBuffer(&SoundOutput, ByteToLock, BytesToWrite, &ApplicationSoundBuffer);
                     }
 
+                    LARGE_INTEGER WorkCompleteCounter = Win32GetWallClock();
+                    float32 WorkSecondsElapsed = Win32GetSecondsElapsed(LastPerformanceCounter, WorkCompleteCounter);
+                    float32 SecondsElapsedForFrame = WorkSecondsElapsed;
+                    if(SecondsElapsedForFrame < TargetSecondsElapsedPerFrame)
+                    {
+                        while(SecondsElapsedForFrame < TargetSecondsElapsedPerFrame)
+                        {
+                            if(SleepIsGranular)
+                            {
+                                DWORD SleepyTime = (DWORD)(1000.0f * (TargetSecondsElapsedPerFrame - SecondsElapsedForFrame));
+                                Sleep(SleepyTime);
+                            }
+                            SecondsElapsedForFrame = Win32GetSecondsElapsed(LastPerformanceCounter, Win32GetWallClock());
+                        }               
+                    }
+                    else
+                    {
+                        // TODO: MISSED FRAME RATE!
+                        // TODO: Logging/Error handling
+                    }
                     win32_window_dim Dim = Win32GetWindowDimension(Window);
-                    Win32BackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, &GlobalBackbuffer,
+                    Win32CopyBackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, &GlobalBackbuffer,
                                             0, 0, Dim.Width, Dim.Height);
 
                     //TODO: Implement swap (and maybe min/max/other useful macros)
@@ -762,20 +804,20 @@ WinMain(HINSTANCE Instance,
                     application_input *Temp = NewInput;
                     NewInput = OldInput;
                     OldInput = Temp;
-                    
+#if 0                    
+                    float64 MSPerFrame = (((1000.0f*(float64)WorkSecondsElapsed) / (float64)GlobalPerformanceCounterFrequency));
+                    float64 FPS = (float64)GlobalPerformanceCounterFrequency / (float64)WorkSecondsElapsed;
+                    float64 MCPF = ((float64)CyclesElapsed / (1000.0f * 1000.0f));
+
+                    char DebugBuffer[256];
+                    wsprintfW((LPWSTR)DebugBuffer, L"%.02fms/f,  %.02ff/s,  %.02fmc/f\n", MSPerFrame, FPS, MCPF);
+                    OutputDebugStringW((LPWSTR)DebugBuffer);
+#endif
+                    LARGE_INTEGER EndPerformanceCounter = Win32GetWallClock();
+                    LastPerformanceCounter = EndPerformanceCounter;
+
                     uint64_t EndCycleCount = __rdtsc();
-                    LARGE_INTEGER EndPerfCount;
-                    QueryPerformanceCounter(&EndPerfCount);
-
                     uint64_t CyclesElapsed = EndCycleCount - LastCycleCount;
-                    int64_t PerfCountElapsed = EndPerfCount.QuadPart - LastPerfCount.QuadPart;
-                    int32_t mSecLastFrame = (int32_t)((1000*PerfCountElapsed) / PerfCountFrequency);
-                    int32_t MCyclesLastFrame = (int32_t)(CyclesElapsed / (1000 * 1000));
-                    //char DebugBuffer[256];
-                    //wsprintfW((LPWSTR)DebugBuffer, L"Last frame: %dms, %d Mcycles\n", mSecLastFrame, MCyclesLastFrame);
-                    //OutputDebugStringW((LPWSTR)DebugBuffer);
-
-                    LastPerfCount = EndPerfCount;
                     LastCycleCount = EndCycleCount;
                 } // while(GlobalRunning)
             }

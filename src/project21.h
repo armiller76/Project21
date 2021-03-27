@@ -45,9 +45,9 @@ struct internal_read_file_result
     uint32_t Size;
     void *Contents;
 };
-internal internal_read_file_result INTERNALPlatformReadEntireFile(char *Filename);
-internal void INTERNALPlatformFreeFileMemory(void *Bitmapmemory);
-internal bool32 INTERNALPlatformWriteEntireFile(char *Filename, uint32_t MemorySize, void *Memory);
+internal internal_read_file_result INTERNAL_PlatformReadEntireFile(char *Filename);
+internal void INTERNAL_PlatformFreeFileMemory(void *Bitmapmemory);
+internal bool32 INTERNAL_PlatformWriteEntireFile(char *Filename, uint32_t MemorySize, void *Memory);
 #endif
 
 
@@ -117,7 +117,7 @@ struct application_clocks
 
 struct application_input
 {
-    //TODO: add clocks here
+    //TODO: add clocks here?
     application_input_device Controllers[5]; // Controller 0 = Keyboard, 1-4 = other XInput devices
 };
 

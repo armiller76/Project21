@@ -68,26 +68,23 @@ ApplicationUpdate(application_memory *Memory,
     application_state *State = (application_state *)Memory->PermanentStorage;
     if (!Memory->ApplicationIsInitialized)
     {
-        
-// file IO testing ///////////////////////////////////////////////////////////        
+#if 1 // file IO testing
         char *FileName = __FILE__;
-        internal_read_file_result File = INTERNALPlatformReadEntireFile(FileName);
+        internal_read_file_result File = INTERNAL_PlatformReadEntireFile(FileName);
         if(File.Contents)
         {
-            INTERNALPlatformWriteEntireFile("test.out", File.Size, File.Contents);
-            INTERNALPlatformFreeFileMemory(File.Contents);
+            INTERNAL_PlatformWriteEntireFile("test.out", File.Size, File.Contents);
+            INTERNAL_PlatformFreeFileMemory(File.Contents);
         }
-// file IO testing ///////////////////////////////////////////////////////////                
-        
+#endif // file IO testing
         
         State->ToneHz = 256;
-
         Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
     }
 
     for(uint32_t ControllerIndex = 0;
-                 ControllerIndex < ArrayCount(Input->Controllers);
-                 ++ControllerIndex)
+        ControllerIndex < ArrayCount(Input->Controllers);
+        ++ControllerIndex)
     {
         application_input_device *Controller = GetController(Input, ControllerIndex);
         if(Controller->IsAnalog)
