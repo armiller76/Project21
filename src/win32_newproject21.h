@@ -27,7 +27,13 @@ struct win32_sound_output
     int32_t LatencySampleCount;
 };
 
-
+#if PROJECT21_INTERNAL
+struct INTERNAL_time_marker
+{
+    DWORD PlayCursor;
+    DWORD WriteCursor;
+};
+#endif
 
 #define WIN32_NEWPROJECT21_H
 #endif

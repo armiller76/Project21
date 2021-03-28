@@ -241,7 +241,7 @@ Win32InitializeDirectSound(HWND Window, uint32_t SamplesPerSecond, uint32_t Buff
 
             DSBUFFERDESC BufferDesc = {};
             BufferDesc.dwSize = sizeof(BufferDesc);
-            BufferDesc.dwFlags = 0;
+            BufferDesc.dwFlags = DSBCAPS_GETCURRENTPOSITION2;
             BufferDesc.dwBufferBytes = BufferSize;
             BufferDesc.lpwfxFormat = &WaveFormat;
             if(SUCCEEDED(DS->CreateSoundBuffer(&BufferDesc, &GlobalAudioBuffer, 0)))
@@ -378,6 +378,45 @@ Win32ProcessKeyboardButton(button_state *NewState, bool32 IsDown)
     NewState->EndedDown = IsDown;
     ++NewState->HalfTransitionCount;
 }
+
+//#if PROJECT21_INTERNAL
+internal void
+INTERNAL_Win32DrawVertical(uint32_t X, uint32_t Top, uint32_t Bottom, uint32_t Color)
+{
+    uint8_t *Pixel = (uint8_t *)GlobalBackbuffer.Memory + X*GlobalBackbuffer.BytesPerPixel + Top*GlobalBackbuffer.Pitch;
+    for(uint32_t Y = 0; Y < Bottom; ++Y)
+    {
+        *(uint32_t *)Pixel = Color;
+        Pixel += GlobalBackbuffer.Pitch;
+    }
+}
+
+inline void
+INTERNAL_Win32DrawAudioCursor(win32_sound_output *SoundOutput, float32 C, uint32_t PadX, uint32_t Top, uint32_t Bottom, DWORD Value, uint32_t Color)
+{
+        Assert(Value < SoundOutput->BufferSize);
+        uint32_t X = PadX + (uint32_t)(C * (float32)Value);
+        INTERNAL_Win32DrawVertical(X, Top, Bottom, Color);
+}
+
+internal void
+INTERNAL_Win32DrawAudioSync(uint32_t CursorCount, INTERNAL_time_marker *Cursors, win32_sound_output *SoundOutput, float32 SecondsPerFrame)
+{
+    uint32_t PadX = 16;
+    uint32_t PadY = 16;
+
+    uint32_t Top =  PadY;
+    uint32_t Bottom = GlobalBackbuffer.Height - PadY;
+
+    float32 C = (float32)(GlobalBackbuffer.Width - 2*PadX) / (float32)(SoundOutput->BufferSize);
+    for (uint32_t CursorIndex = 0; CursorIndex < CursorCount; ++CursorIndex)
+    {
+        INTERNAL_time_marker *Marker = &Cursors[CursorIndex];
+        INTERNAL_Win32DrawAudioCursor(SoundOutput, C, PadX, Top, Bottom, Marker->PlayCursor, 0xFFFFFFFF);
+        INTERNAL_Win32DrawAudioCursor(SoundOutput, C, PadX, Top, Bottom, Marker->WriteCursor, 0xFF0000FF);
+    }
+}
+//#endif
 
 internal void
 Win32ProcessWindowsMessages(application_input_device *Keyboard)
@@ -556,9 +595,10 @@ WinMain(HINSTANCE Instance,
     WindowClass.lpszClassName = (LPCWSTR)"Project21";           // LPCWSTR     lpszClassName;
 
     //TODO: find a reliable way to get this from windows...
-    uint32_t MonitorRefreshRate = 60;
-    uint32_t GameUpdateHz = MonitorRefreshRate / 2; 
-    float32 TargetSecondsElapsedPerFrame = 1.0f / (float32)GameUpdateHz;
+#define DEFINEDMonitorRefreshRate 60
+#define DEFINEDGameUpdateHz (DEFINEDMonitorRefreshRate / 2)
+#define DEFINEDFramesOfAudioLatency 3
+    float32 TargetSecondsElapsedPerFrame = 1.0f / (float32)DEFINEDGameUpdateHz;
     
     if(RegisterClassW(&WindowClass))
     {
@@ -586,7 +626,7 @@ WinMain(HINSTANCE Instance,
             win32_sound_output SoundOutput = {};
             SoundOutput.BytesPerSample = sizeof(int16_t)*2;
             SoundOutput.SamplesPerSecond = 48000;
-            SoundOutput.LatencySampleCount = SoundOutput.SamplesPerSecond / 15;
+            SoundOutput.LatencySampleCount = DEFINEDFramesOfAudioLatency * (SoundOutput.SamplesPerSecond / DEFINEDGameUpdateHz);
             SoundOutput.BufferSize = SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample;            
             Win32InitializeDirectSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.BufferSize);
             Win32ClearSoundBuffer(&SoundOutput);
@@ -612,36 +652,44 @@ WinMain(HINSTANCE Instance,
             if (AudioCopyBuffer && ApplicationMemory.PermanentStorage && ApplicationMemory.TransientStorage)
             {
                 application_input ApplicationInput[2] = {}; 
-                application_input *NewInput = &ApplicationInput[0];
-                application_input *OldInput = &ApplicationInput[1];
+                application_input *InputThisFrame = &ApplicationInput[0];
+                application_input *InputLastFrame = &ApplicationInput[1];
 
                 // MAIN LOOP
                 GlobalRunning = true;
                 HDC DeviceContext = GetDC(Window);
                 LARGE_INTEGER LastPerformanceCounter = Win32GetWallClock();
+                //TODO: Something about startup https://youtu.be/qFl62ka51Mc?t=3385
+                DWORD LastPlayCursor = 0;
+                bool32 SoundIsValid = false;
+
+#if PROJECT21_INTERNAL
+                uint32_t DEBUGAudioCursorIndex = 0;
+                INTERNAL_time_marker DEBUGAudioCursors[DEFINEDGameUpdateHz] = {0};
+#endif
 
                 while(GlobalRunning)
                 {
-                    application_input_device *NewKeyboard = GetController(NewInput, 0);
-                    application_input_device *OldKeyboard = GetController(OldInput, 0);
-                    application_input_device ZeroInput_Controller = {};
-                    *NewKeyboard = ZeroInput_Controller;
-                    NewKeyboard->IsConnected = true;
+                    application_input_device *KeyboardThisFrame = GetController(InputThisFrame, 0);
+                    application_input_device *KeyboardLastFrame = GetController(InputLastFrame, 0);
+                    application_input_device ZeroedInputDevice = {};
+                    *KeyboardThisFrame = ZeroedInputDevice;
+                    KeyboardThisFrame->IsConnected = true;
                     for(uint32_t ButtonIndex = 0;
-                                 ButtonIndex < ArrayCount(NewKeyboard->Buttons);
+                                 ButtonIndex < ArrayCount(KeyboardThisFrame->Buttons);
                                  ++ButtonIndex)
                     {   // EndedDown needs to persist between frames
-                        NewKeyboard->Buttons[ButtonIndex].EndedDown = OldKeyboard->Buttons[ButtonIndex].EndedDown;
+                        KeyboardThisFrame->Buttons[ButtonIndex].EndedDown = KeyboardLastFrame->Buttons[ButtonIndex].EndedDown;
                     }
 
-                    Win32ProcessWindowsMessages(NewKeyboard);
+                    Win32ProcessWindowsMessages(KeyboardThisFrame);
                     
                     // Controller/Keyboard loop
                     //TODO: Poll more frequently?
                     uint32_t ApplicationMaxControllerCount = XUSER_MAX_COUNT;
-                    if(ApplicationMaxControllerCount > (ArrayCount(NewInput->Controllers) - 1))
+                    if(ApplicationMaxControllerCount > (ArrayCount(InputThisFrame->Controllers) - 1))
                     {
-                        ApplicationMaxControllerCount = (ArrayCount(NewInput->Controllers) - 1);
+                        ApplicationMaxControllerCount = (ArrayCount(InputThisFrame->Controllers) - 1);
                     }
 
                     for (DWORD XInputControllerIndex = 0;
@@ -649,8 +697,8 @@ WinMain(HINSTANCE Instance,
                         ++XInputControllerIndex)
                     {   
                         DWORD ApplicationControllerIndex = 1 + XInputControllerIndex;
-                        application_input_device *OldControllerState = GetController(OldInput, ApplicationControllerIndex);
-                        application_input_device *NewControllerState = GetController(NewInput, ApplicationControllerIndex);
+                        application_input_device *OldControllerState = GetController(InputLastFrame, ApplicationControllerIndex);
+                        application_input_device *NewControllerState = GetController(InputThisFrame, ApplicationControllerIndex);
                         
                         XINPUT_STATE ControllerState;
                         DWORD XInputGetStateResult = XInputGetState(XInputControllerIndex, &ControllerState);
@@ -733,24 +781,14 @@ WinMain(HINSTANCE Instance,
                         }
                     } // Controller processing
 
-                    application_offscreen_buffer ApplicationOffscreenBuffer = {};
-                    ApplicationOffscreenBuffer.Memory = GlobalBackbuffer.Memory;
-                    ApplicationOffscreenBuffer.Width = GlobalBackbuffer.Width;
-                    ApplicationOffscreenBuffer.Height = GlobalBackbuffer.Height;
-                    ApplicationOffscreenBuffer.Pitch = GlobalBackbuffer.Pitch;
-
-                    //TODO: this is fairly okayish test code, but there is zero syncronization with the
-                    // rest of the application. that needs to be worked out.
-                    bool32 SoundIsValid = false;
-                    DWORD PlayCursor = 0;
-                    DWORD WriteCursor = 0;
+                    
                     DWORD TargetCursor = 0;
                     DWORD ByteToLock = 0;
                     DWORD BytesToWrite = 0;
-                    if(SUCCEEDED(GlobalAudioBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor)))
+                    if(SoundIsValid)
                     {
                         ByteToLock = ((SoundOutput.SampleIndex*SoundOutput.BytesPerSample) % SoundOutput.BufferSize);
-                        TargetCursor = (PlayCursor + (SoundOutput.LatencySampleCount * SoundOutput.BytesPerSample)) % SoundOutput.BufferSize;
+                        TargetCursor = (LastPlayCursor + (SoundOutput.LatencySampleCount * SoundOutput.BytesPerSample)) % SoundOutput.BufferSize;
                         if (ByteToLock > TargetCursor)
                         {
                             BytesToWrite = SoundOutput.BufferSize - ByteToLock;
@@ -760,15 +798,18 @@ WinMain(HINSTANCE Instance,
                         {
                             BytesToWrite = TargetCursor - ByteToLock;
                         }
-                        SoundIsValid = true;
                     }
 
                     application_sound_output_buffer ApplicationSoundBuffer = {};
                     ApplicationSoundBuffer.SamplesPerSecond = SoundOutput.SamplesPerSecond;
                     ApplicationSoundBuffer.SampleCount = BytesToWrite / SoundOutput.BytesPerSample;
                     ApplicationSoundBuffer.Memory = AudioCopyBuffer;
-                    
-                    ApplicationUpdate(&ApplicationMemory, &ApplicationOffscreenBuffer, &ApplicationSoundBuffer, NewInput);
+                    application_offscreen_buffer ApplicationOffscreenBuffer = {};
+                    ApplicationOffscreenBuffer.Memory = GlobalBackbuffer.Memory;
+                    ApplicationOffscreenBuffer.Width = GlobalBackbuffer.Width;
+                    ApplicationOffscreenBuffer.Height = GlobalBackbuffer.Height;
+                    ApplicationOffscreenBuffer.Pitch = GlobalBackbuffer.Pitch;
+                    ApplicationUpdate(&ApplicationMemory, &ApplicationOffscreenBuffer, &ApplicationSoundBuffer, InputThisFrame);
                     
                     if(SoundIsValid)
                     {
@@ -784,7 +825,7 @@ WinMain(HINSTANCE Instance,
                         {
                             if(SleepIsGranular)
                             {
-                                DWORD SleepyTime = (DWORD)(1000.0f * (TargetSecondsElapsedPerFrame - SecondsElapsedForFrame));
+                                DWORD SleepyTime = (DWORD)(1000.0f * (TargetSecondsElapsedPerFrame - TargetSecondsElapsedPerFrame));
                                 Sleep(SleepyTime);
                             }
                             SecondsElapsedForFrame = Win32GetSecondsElapsed(LastPerformanceCounter, Win32GetWallClock());
@@ -795,35 +836,65 @@ WinMain(HINSTANCE Instance,
                         // TODO: MISSED FRAME RATE!
                         // TODO: Logging/Error handling
                     }
-                    win32_window_dim Dim = Win32GetWindowDimension(Window);
-                    Win32CopyBackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, &GlobalBackbuffer,
-                                            0, 0, Dim.Width, Dim.Height);
-
-                    //TODO: Implement swap (and maybe min/max/other useful macros)
-                    //TODO: Do these need to be cleared to zero? or something else?
-                    application_input *Temp = NewInput;
-                    NewInput = OldInput;
-                    OldInput = Temp;
 
                     LARGE_INTEGER EndPerformanceCounter = Win32GetWallClock();
                     float64 MSPerFrame = 1000.0f*Win32GetSecondsElapsed(LastPerformanceCounter, EndPerformanceCounter);
                     LastPerformanceCounter = EndPerformanceCounter;
 
+                    win32_window_dim Dim = Win32GetWindowDimension(Window);
+#if PROJECT21_INTERNAL                    
+                    INTERNAL_Win32DrawAudioSync(ArrayCount(DEBUGAudioCursors), DEBUGAudioCursors, &SoundOutput, SecondsElapsedForFrame);
+#endif
+                    Win32CopyBackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, &GlobalBackbuffer, 0, 0, Dim.Width, Dim.Height);
+                    DWORD PlayCursor;
+                    DWORD WriteCursor;
+                    if(GlobalAudioBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor) == DS_OK)
+                    {
+                        LastPlayCursor = PlayCursor;
+                        if(!SoundIsValid)
+                        {
+                            SoundOutput.SampleIndex = WriteCursor / SoundOutput.BytesPerSample;
+                            SoundIsValid = true;
+                        }
+                    }
+                    else
+                    {
+                        SoundIsValid = false;
+                    }
+
+#if PROJECT21_INTERNAL                    
+                    {
+                        INTERNAL_time_marker *Marker = &DEBUGAudioCursors[DEBUGAudioCursorIndex++];
+                        if(DEBUGAudioCursorIndex > ArrayCount(DEBUGAudioCursors))
+                        {
+                            DEBUGAudioCursorIndex = 0; 
+                        }
+                        Marker->PlayCursor = PlayCursor;
+                        Marker->WriteCursor = WriteCursor;
+                    }
+#endif
+
+                    //TODO: Implement swap (and maybe min/max/other useful macros)
+                    //TODO: Do these need to be cleared to zero? or something else?
+                    application_input *Temp = InputThisFrame;
+                    InputThisFrame = InputLastFrame;
+                    InputLastFrame = Temp;
+
                     uint64_t EndCycleCount = __rdtsc();
                     uint64_t CyclesElapsed = EndCycleCount - LastCycleCount;
                     LastCycleCount = EndCycleCount;
 
-                    float64 FPS = (float64)GlobalPerformanceCounterFrequency / (float64)WorkSecondsElapsed;
+                    float64 FPS = 0.0f;
                     float64 MCPF = ((float64)CyclesElapsed / (1000.0f * 1000.0f));
-#if 0                    
+#if 1                    
                     char DebugBuffer[256];
-                    sprintf_s((LPWSTR)DebugBuffer, L"%.02fms/f,  %.02ff/s,  %.02fmc/f\n", MSPerFrame, FPS, MCPF);
-                    OutputDebugStringW((LPWSTR)DebugBuffer);
+                    sprintf_s(DebugBuffer, "%.02fms/f,  %.02ff/s,  %.02fmc/f\n", MSPerFrame, FPS, MCPF);
+                    OutputDebugStringA(DebugBuffer);
 #endif
 
                 } // while(GlobalRunning)
             }
-            else // Either audio buffer pointer or app memory pointer or transient memory pointer are borked
+            else // Either audio buffer pointer or one of the memory pointers is borked
             {
                 //TODO: Logging/Error handling
             }
