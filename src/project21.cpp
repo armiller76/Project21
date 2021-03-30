@@ -2,16 +2,15 @@
 #include "project21.h"
 
 internal void
-ApplicationOutputSound(application_memory *Memory, application_sound_output_buffer *SoundBuffer)
+ApplicationOutputSound(application_state *State, application_sound_output_buffer *SoundBuffer)
 {
     int16_t ToneVol = 256;
-    application_state *State = (application_state *)Memory->PermanentStorage;
-    float32 SineValue = State->tSine;
-    int32_t WavePeriod = SoundBuffer->SamplesPerSecond;
+    int32_t WavePeriod = SoundBuffer->SamplesPerSecond / State->ToneHz;
     
     int16_t *SampleOut = SoundBuffer->Memory;
     for(int32_t SampleIndex = 0; SampleIndex < SoundBuffer->SampleCount; ++SampleIndex)
     {
+        float32 SineValue = sinf(State->tSine);
         int16_t SampleValue = (int16_t)(SineValue * ToneVol);
         *SampleOut++ = SampleValue;
         *SampleOut++ = SampleValue;
@@ -19,7 +18,7 @@ ApplicationOutputSound(application_memory *Memory, application_sound_output_buff
         State->tSine += (2.0f*Pi32)/(float32)WavePeriod;
         if(State->tSine > (2.0f*Pi32))
         {
-            State->tSine = 0;
+            State->tSine -= 2.0f*Pi32;
         }
     }
 }
@@ -40,7 +39,7 @@ RenderGradient(application_offscreen_buffer *Buffer, int XOffset, int YOffset)
         {
             uint8_t Blue = (uint8_t)(X + XOffset);
             uint8_t Green = (uint8_t)(Y + YOffset);
-            *Pixel++ = ((Green << 8) | Blue);
+            *Pixel++ = ((Green << 16) | Blue);
         }
         Row += Buffer->Pitch;
     }
@@ -53,6 +52,7 @@ extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, a
     application_state *State = (application_state *)Memory->PermanentStorage;
     if (!Memory->ApplicationIsInitialized)
     {
+
 #if 1 // file IO testing
         char *FileName = __FILE__;
         internal_read_file_result File = Memory->INTERNAL_PlatformReadEntireFile(FileName);
@@ -64,6 +64,7 @@ extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, a
 #endif // file IO testing
         
         State->ToneHz = 1024;
+        State->tSine = 0;
         Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
     }
 
@@ -108,12 +109,6 @@ extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, a
 
 extern "C" APPLICATION_GET_SOUND(ApplicationGetSound) // parameters: (application_memory *Memory, application_sound_output_buffer *Buffer)
 {
-    application_state *State = (application_state *)Memory->PermanentStorage;
-    ApplicationOutputSound(Memory, Buffer);
-}
-
-#include "Windows.h"
-BOOL WINAPI DllMain(HINSTANCE Instance, DWORD Reason, LPVOID Reserved)
-{
-    return TRUE;
+    application_state *ApplicationState = (application_state *)Memory->PermanentStorage;
+    ApplicationOutputSound(ApplicationState, Buffer);
 }

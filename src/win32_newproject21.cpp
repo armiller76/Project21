@@ -135,21 +135,32 @@ Win32GetWindowDimension(HWND Window)
     return(Result);
 }
 
-struct win32_application_library
+inline FILETIME
+Win32GetLastWriteTime(char *Filename)
 {
-    HMODULE Library;
-    application_update *Update;
-    application_get_sound *GetSound;
-    bool32 Valid;
-};
+    FILETIME Result = {};
 
-internal win32_application_library
-Win32LoadApplicationLibrary()
+    WIN32_FIND_DATA FindData;
+    HANDLE Handle = FindFirstFile(Filename, &FindData);
+    if(Handle)
+    {
+        Result = FindData.ftLastWriteTime;
+        FindClose(Handle);
+    }
+
+    return(Result);
+}
+
+internal win32_application
+Win32LoadApplication(char *LibraryFilename, char *CopiedFilename)
 {
-    CopyFile("project21.dll", "project21_temp.dll", FALSE);
+    win32_application Result = {};
+
+    Result.LastLibraryUpdateTime = Win32GetLastWriteTime(LibraryFilename);
+
+    CopyFile(LibraryFilename, CopiedFilename, FALSE);
     
-    win32_application_library Result = {};
-    Result.Library = LoadLibrary("project21_temp.dll");
+    Result.Library = LoadLibrary(CopiedFilename);
     
     if (Result.Library)
     {
@@ -168,7 +179,7 @@ Win32LoadApplicationLibrary()
 }
 
 internal void
-WIN32UnloadApplicationLibrary(win32_application_library *Application)
+WIN32UnloadApplicationLibrary(win32_application *Application)
 {
     if(Application->Library)
     {
@@ -650,12 +661,46 @@ Win32MainWindowCallback(HWND Window,
     return (Result);
 }
 
+internal void
+Concatenate(char *SourceA, size_t SourceACount, char *SourceB, size_t SourceBCount, char *Destination, size_t DestinationCount)
+{
+    
+    //TODO: Bounds checking
+    for(uint32_t Index = 0; Index < SourceACount; ++Index)
+    {
+        *Destination++ = *SourceA++;
+    }
+    for(uint32_t Index = 0; Index < SourceBCount; ++Index)
+    {
+        *Destination++ = *SourceB++;
+    }
+    *Destination = 0;
+}
+
 int CALLBACK
 WinMain(HINSTANCE Instance,
         HINSTANCE PrevInstance,
         LPSTR CommandLine,
         int ShowCode)
 {
+    char MyExecutableFilename[MAX_PATH];
+    DWORD SizeOfMyExecutableFilename = GetModuleFileName(0, MyExecutableFilename, sizeof(MyExecutableFilename));
+    char *LastSlash = MyExecutableFilename;
+    for(char *Scanner = MyExecutableFilename; *Scanner; ++Scanner)
+    {
+        if(*Scanner == '\\')
+        {
+            LastSlash = Scanner + 1;
+        }
+    }
+
+    char ApplicationDLLFilename[] = "project21.dll";
+    char ApplicationDLLFullPath[MAX_PATH];
+    Concatenate(MyExecutableFilename, LastSlash - MyExecutableFilename, ApplicationDLLFilename, sizeof(ApplicationDLLFilename) - 1, ApplicationDLLFullPath, sizeof(ApplicationDLLFullPath));
+    char CopiedDLLFilename[] = "project21_.dll";
+    char CopiedDLLFullPath[MAX_PATH];
+    Concatenate(MyExecutableFilename, LastSlash - MyExecutableFilename, CopiedDLLFilename, sizeof(CopiedDLLFilename) - 1, CopiedDLLFullPath, sizeof(CopiedDLLFullPath));
+
     LARGE_INTEGER PerformanceCounterFrequency;
     QueryPerformanceFrequency(&PerformanceCounterFrequency);
     GlobalPerformanceCounterFrequency = PerformanceCounterFrequency.QuadPart;
@@ -741,16 +786,14 @@ WinMain(HINSTANCE Instance,
 
             if (AllocatedAudioBufferMemory && ApplicationMemory.PermanentStorage && ApplicationMemory.TransientStorage)
             {
-                application_input ApplicationInput[2] = {}; 
-                application_input *InputThisFrame = &ApplicationInput[0];
-                application_input *InputLastFrame = &ApplicationInput[1];
-
-                // MAIN LOOP
                 GlobalRunning = true;
                 HDC DeviceContext = GetDC(Window);
                 LARGE_INTEGER LastPerformanceCounter = Win32GetWallClock();
                 LARGE_INTEGER FrameFlipWallClock = Win32GetWallClock();
-                //TODO: Something about startup https://youtu.be/qFl62ka51Mc?t=3385
+
+                application_input ApplicationInput[2] = {}; 
+                application_input *InputThisFrame = &ApplicationInput[0];
+                application_input *InputLastFrame = &ApplicationInput[1];
 
                 DWORD AudioLatencyBytes = 0;
                 float32 AudioLatencySeconds = 0.0f;
@@ -760,16 +803,15 @@ WinMain(HINSTANCE Instance,
                 uint32_t DEBUGAudioCursorIndex = 0;
                 INTERNAL_time_marker DEBUGAudioCursors[DEFINEDGameUpdateHz] = {0};
 #endif
-                win32_application_library Application = Win32LoadApplicationLibrary();
-                uint32_t LoadCounter = 0;
+                win32_application Application = Win32LoadApplication(ApplicationDLLFilename, CopiedDLLFilename);
 
                 while(GlobalRunning)
                 {
-                    if(LoadCounter++ > 120)
+                    FILETIME LatestDLLWriteTime = Win32GetLastWriteTime(ApplicationDLLFilename);
+                    if(CompareFileTime(&LatestDLLWriteTime, &Application.LastLibraryUpdateTime) != 0)
                     {
                         WIN32UnloadApplicationLibrary(&Application);
-                        Application = Win32LoadApplicationLibrary();
-                        LoadCounter = 0;
+                        Application = Win32LoadApplication(ApplicationDLLFilename, CopiedDLLFilename);
                     }
 
                     application_input_device *KeyboardThisFrame = GetController(InputThisFrame, 0);

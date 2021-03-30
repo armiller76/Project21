@@ -28,6 +28,16 @@ struct win32_sound_output
     int32_t LatencySampleCount;
 };
 
+struct win32_application
+{
+    HMODULE Library;
+    FILETIME LastLibraryUpdateTime;
+    application_update *Update;
+    application_get_sound *GetSound;
+    
+    bool32 Valid;
+};
+
 #if PROJECT21_INTERNAL
 struct INTERNAL_time_marker
 {
