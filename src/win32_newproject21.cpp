@@ -1,28 +1,5 @@
 
-#include <math.h> // currenly only using sinf - can I do better / as well?
-#include <stdint.h>
-
-#define local_persist static
-#define global_variable static
-#define internal static
-
-#define COLOR_WHITE     0xFFFFFFFF
-#define COLOR_RED       0xFFFF0000
-#define COLOR_BLUE      0xFF0000FF
-#define COLOR_GREEN     0xFF00FF00
-#define COLOR_CYAN      0xFF00FFFF
-#define COLOR_MAGENTA   0xFFFF00FF
-#define COLOR_YELLOW    0xFFFFFF00
-#define COLOR_BLACK     0xFF000000
-
-
-#define Pi32 3.14159265359f
-
-typedef float float32;
-typedef double float64;
-typedef int32_t bool32;
-
-#include "project21.cpp"
+#include "project21.h"
 
 #include <Windows.h>
 #include <stdio.h>
@@ -31,6 +8,12 @@ typedef int32_t bool32;
 #include <dsound.h>
 
 #include "win32_newproject21.h"
+
+global_variable bool32 GlobalRunning;
+global_variable bool32 GlobalPause;
+global_variable win32_offscreen_buffer GlobalBackbuffer;
+global_variable LPDIRECTSOUNDBUFFER GlobalAudioBuffer;
+global_variable int64_t GlobalPerformanceCounterFrequency;
 
 #define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
 typedef X_INPUT_GET_STATE(x_input_get_state);
@@ -47,11 +30,6 @@ global_variable x_input_set_state *XInputSetState_;
 #define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter)
 typedef DIRECT_SOUND_CREATE(direct_sound_create);
 
-global_variable bool32 GlobalRunning;
-global_variable bool32 GlobalPause;
-global_variable win32_offscreen_buffer GlobalBackbuffer;
-global_variable LPDIRECTSOUNDBUFFER GlobalAudioBuffer;
-global_variable int64_t GlobalPerformanceCounterFrequency;
 inline LARGE_INTEGER
 Win32GetWallClock()
 {
@@ -67,12 +45,19 @@ Win32GetSecondsElapsed(LARGE_INTEGER Start, LARGE_INTEGER End)
     return(Result);
 }
 
-internal internal_read_file_result
-INTERNAL_PlatformReadEntireFile(char *FileName)
+INTERNAL_PLATFORM_FREE_FILE_MEMORY(INTERNAL_PlatformFreeFileMemory) // parameters: (void *Bitmapmemory)
+{
+    if(Bitmapmemory)
+    {
+        VirtualFree(Bitmapmemory, 0, MEM_RELEASE);
+    }
+}
+
+INTERNAL_PLATFORM_READ_ENTIRE_FILE(INTERNAL_PlatformReadEntireFile) // parameters: (char *Filename)
 {
     internal_read_file_result Result = {};
 
-    HANDLE FileHandle = CreateFileA(FileName, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    HANDLE FileHandle = CreateFileA(Filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
     if(FileHandle != INVALID_HANDLE_VALUE)
     {
         LARGE_INTEGER FileSize;
@@ -114,21 +99,11 @@ INTERNAL_PlatformReadEntireFile(char *FileName)
     return(Result);
 }
 
-internal void 
-INTERNAL_PlatformFreeFileMemory(void *Memory)
-{
-    if(Memory)
-    {
-        VirtualFree(Memory, 0, MEM_RELEASE);
-    }
-}
-
-internal bool32 
-INTERNAL_PlatformWriteEntireFile(char *FileName, uint32_t MemorySize, void *Memory)
+INTERNAL_PLATFORM_WRITE_ENTIRE_FILE(INTERNAL_PlatformWriteEntireFile) // parameters: (char *Filename, uint32_t MemorySize, void *Memory)
 {
     bool32 Result = false;
 
-    HANDLE FileHandle = CreateFileA(FileName, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+    HANDLE FileHandle = CreateFileA(Filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
     if(FileHandle != INVALID_HANDLE_VALUE)
     {
         DWORD BytesWritten;
@@ -158,6 +133,51 @@ Win32GetWindowDimension(HWND Window)
     Result.Width = ClientRect.right - ClientRect.left;
     Result.Height = ClientRect.bottom - ClientRect.top;
     return(Result);
+}
+
+struct win32_application_library
+{
+    HMODULE Library;
+    application_update *Update;
+    application_get_sound *GetSound;
+    bool32 Valid;
+};
+
+internal win32_application_library
+Win32LoadApplicationLibrary()
+{
+    CopyFile("project21.dll", "project21_temp.dll", FALSE);
+    
+    win32_application_library Result = {};
+    Result.Library = LoadLibrary("project21_temp.dll");
+    
+    if (Result.Library)
+    {
+        Result.Update = (application_update *)GetProcAddress(Result.Library, "ApplicationUpdate");
+        Result.GetSound = (application_get_sound *)GetProcAddress(Result.Library, "ApplicationGetSound");
+        Result.Valid = (Result.Update && Result.GetSound);
+    }
+
+    if(!Result.Valid)
+    {
+        Result.Update = ApplicationUpdateStub;
+        Result.GetSound = ApplicationGetSoundStub;
+    }
+
+    return(Result);
+}
+
+internal void
+WIN32UnloadApplicationLibrary(win32_application_library *Application)
+{
+    if(Application->Library)
+    {
+        FreeLibrary(Application->Library);
+        Application->Library = 0;
+    }
+    Application->Valid = false;
+    Application->GetSound = ApplicationGetSoundStub;
+    Application->Update = ApplicationUpdateStub;
 }
 
 internal void
@@ -708,10 +728,13 @@ WinMain(HINSTANCE Instance,
             LPVOID BaseAddress = 0;
 #endif
             application_memory ApplicationMemory = {};
+            ApplicationMemory.INTERNAL_PlatformFreeFileMemory = INTERNAL_PlatformFreeFileMemory;
+            ApplicationMemory.INTERNAL_PlatformReadEntireFile = INTERNAL_PlatformReadEntireFile;
+            ApplicationMemory.INTERNAL_PlatformWriteEntireFile = INTERNAL_PlatformWriteEntireFile;
+
             ApplicationMemory.PermanentStorageSize = Megabytes(64);
             ApplicationMemory.TransientStorageSize = Gigabytes(1);
             uint64_t TotalMemorySize = ApplicationMemory.PermanentStorageSize + ApplicationMemory.TransientStorageSize;
-            
             ApplicationMemory.PermanentStorage = VirtualAlloc(BaseAddress, TotalMemorySize, 
                                                               MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
             ApplicationMemory.TransientStorage = ((uint8_t *)(ApplicationMemory.PermanentStorage) + ApplicationMemory.PermanentStorageSize); 
@@ -737,9 +760,18 @@ WinMain(HINSTANCE Instance,
                 uint32_t DEBUGAudioCursorIndex = 0;
                 INTERNAL_time_marker DEBUGAudioCursors[DEFINEDGameUpdateHz] = {0};
 #endif
+                win32_application_library Application = Win32LoadApplicationLibrary();
+                uint32_t LoadCounter = 0;
 
                 while(GlobalRunning)
                 {
+                    if(LoadCounter++ > 120)
+                    {
+                        WIN32UnloadApplicationLibrary(&Application);
+                        Application = Win32LoadApplicationLibrary();
+                        LoadCounter = 0;
+                    }
+
                     application_input_device *KeyboardThisFrame = GetController(InputThisFrame, 0);
                     application_input_device *KeyboardLastFrame = GetController(InputLastFrame, 0);
                     application_input_device ZeroedInputDevice = {};
@@ -860,7 +892,7 @@ WinMain(HINSTANCE Instance,
                         ApplicationOffscreenBuffer.Width = GlobalBackbuffer.Width;
                         ApplicationOffscreenBuffer.Height = GlobalBackbuffer.Height;
                         ApplicationOffscreenBuffer.Pitch = GlobalBackbuffer.Pitch;
-                        ApplicationUpdate(&ApplicationMemory, &ApplicationOffscreenBuffer, InputThisFrame);
+                        Application.Update(&ApplicationMemory, &ApplicationOffscreenBuffer, InputThisFrame);
 
                         LARGE_INTEGER AudioWallClock = Win32GetWallClock();
                         float64 SecondsSinceFrameFlip = Win32GetSecondsElapsed(FrameFlipWallClock, AudioWallClock);
@@ -930,7 +962,7 @@ WinMain(HINSTANCE Instance,
                             ApplicationSoundBuffer.SamplesPerSecond = SoundOutput.SamplesPerSecond;
                             ApplicationSoundBuffer.SampleCount = BytesToWrite / SoundOutput.BytesPerSample;
                             ApplicationSoundBuffer.Memory = AllocatedAudioBufferMemory;
-                            ApplicationGetSoundForFrame(&ApplicationMemory, &ApplicationSoundBuffer);
+                            Application.GetSound(&ApplicationMemory, &ApplicationSoundBuffer);
                         
     #if PROJECT21_INTERNAL
                             INTERNAL_time_marker *Marker = &DEBUGAudioCursors[DEBUGAudioCursorIndex];

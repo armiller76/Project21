@@ -11,7 +11,7 @@
             "program": "${workspaceFolder}/build/win32_newproject21.exe",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build",
             "environment": [],
             "console": "internalConsole"
         }

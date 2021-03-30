@@ -1,24 +1,25 @@
+
 #include "project21.h"
 
 internal void
-ApplicationOutputSound(application_sound_output_buffer *SoundBuffer, int ToneHz)
+ApplicationOutputSound(application_memory *Memory, application_sound_output_buffer *SoundBuffer)
 {
-    local_persist float32 tSine;
     int16_t ToneVol = 256;
-    int32_t WavePeriod = SoundBuffer->SamplesPerSecond / ToneHz;
+    application_state *State = (application_state *)Memory->PermanentStorage;
+    float32 SineValue = State->tSine;
+    int32_t WavePeriod = SoundBuffer->SamplesPerSecond;
     
     int16_t *SampleOut = SoundBuffer->Memory;
     for(int32_t SampleIndex = 0; SampleIndex < SoundBuffer->SampleCount; ++SampleIndex)
     {
-        float32 SineValue = sinf(tSine);
         int16_t SampleValue = (int16_t)(SineValue * ToneVol);
         *SampleOut++ = SampleValue;
         *SampleOut++ = SampleValue;
         
-        tSine += (2.0f*Pi32)/(float32)WavePeriod;
-        if(tSine > (2.0f*Pi32))
+        State->tSine += (2.0f*Pi32)/(float32)WavePeriod;
+        if(State->tSine > (2.0f*Pi32))
         {
-            tSine = 0;
+            State->tSine = 0;
         }
     }
 }
@@ -45,26 +46,7 @@ RenderGradient(application_offscreen_buffer *Buffer, int XOffset, int YOffset)
     }
 }
 
-inline application_input_device *GetController(application_input *Input, uint32_t ControllerIndex)
-{
-    Assert(ControllerIndex < ArrayCount(Input->Controllers));
-    return(&Input->Controllers[ControllerIndex]);
-}
-
-#if 0
-internal application_state *ApplicationStartup(void)
-{
-    application_state Result = {};
-    Result.ToneHz = 256;
-    Result.BlueOffset = Result.GreenOffset = 0;
-    return(&Result);
-}
-#endif
-
-internal void
-ApplicationUpdate(application_memory *Memory,
-                  application_offscreen_buffer *BitmapBuffer, 
-                  application_input *Input)
+extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input)
 {
     Assert(sizeof(application_state) <= Memory->PermanentStorageSize);
     
@@ -73,11 +55,11 @@ ApplicationUpdate(application_memory *Memory,
     {
 #if 1 // file IO testing
         char *FileName = __FILE__;
-        internal_read_file_result File = INTERNAL_PlatformReadEntireFile(FileName);
+        internal_read_file_result File = Memory->INTERNAL_PlatformReadEntireFile(FileName);
         if(File.Contents)
         {
-            INTERNAL_PlatformWriteEntireFile("test.out", File.Size, File.Contents);
-            INTERNAL_PlatformFreeFileMemory(File.Contents);
+            Memory->INTERNAL_PlatformWriteEntireFile("test.out", File.Size, File.Contents);
+            Memory->INTERNAL_PlatformFreeFileMemory(File.Contents);
         }
 #endif // file IO testing
         
@@ -121,12 +103,17 @@ ApplicationUpdate(application_memory *Memory,
         }
     }
 
-    RenderGradient(BitmapBuffer, State->BlueOffset, State->GreenOffset);
+    RenderGradient(Buffer, State->BlueOffset, State->GreenOffset);
 }
 
-internal void 
-ApplicationGetSoundForFrame(application_memory *Memory, application_sound_output_buffer *Buffer)
+extern "C" APPLICATION_GET_SOUND(ApplicationGetSound) // parameters: (application_memory *Memory, application_sound_output_buffer *Buffer)
 {
     application_state *State = (application_state *)Memory->PermanentStorage;
-    ApplicationOutputSound(Buffer, State->ToneHz);
+    ApplicationOutputSound(Memory, Buffer);
+}
+
+#include "Windows.h"
+BOOL WINAPI DllMain(HINSTANCE Instance, DWORD Reason, LPVOID Reserved)
+{
+    return TRUE;
 }

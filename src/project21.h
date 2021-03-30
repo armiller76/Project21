@@ -10,13 +10,33 @@
         1 - slow code okay/expected
 */
 
-/*********************/
-/*     Utilities     */
-/*********************/
-
+/*************************************/
+/*     Definitions and Utilities     */
+/*************************************/
 //IMPORTANT take this out ASAP
 #define PROJECT21_INTERNAL 1 // for now, so VSC stops being a bitch
 
+#include <math.h> // currenly only using sinf - can I do better / as well?
+#include <stdint.h>
+
+#define local_persist static
+#define global_variable static
+#define internal static
+
+#define COLOR_WHITE     0xFFFFFFFF
+#define COLOR_RED       0xFFFF0000
+#define COLOR_BLUE      0xFF0000FF
+#define COLOR_GREEN     0xFF00FF00
+#define COLOR_CYAN      0xFF00FFFF
+#define COLOR_MAGENTA   0xFFFF00FF
+#define COLOR_YELLOW    0xFFFFFF00
+#define COLOR_BLACK     0xFF000000
+
+#define Pi32 3.14159265359f
+
+typedef float float32;
+typedef double float64;
+typedef int32_t bool32;
 
 #if PROJECT21_SLOW
 #define Assert(Expression) if(!(Expression)) { *(int *)0 = 0; }
@@ -48,14 +68,21 @@ struct internal_read_file_result
     uint32_t Size;
     void *Contents;
 };
-internal internal_read_file_result INTERNAL_PlatformReadEntireFile(char *Filename);
-internal void INTERNAL_PlatformFreeFileMemory(void *Bitmapmemory);
-internal bool32 INTERNAL_PlatformWriteEntireFile(char *Filename, uint32_t MemorySize, void *Memory);
+
+#define INTERNAL_PLATFORM_FREE_FILE_MEMORY(name) void name(void *Bitmapmemory)
+typedef INTERNAL_PLATFORM_FREE_FILE_MEMORY(INTERNAL_platform_free_file_memory);
+
+#define INTERNAL_PLATFORM_READ_ENTIRE_FILE(name) internal_read_file_result name(char *Filename)
+typedef INTERNAL_PLATFORM_READ_ENTIRE_FILE(INTERNAL_platform_read_entire_file);
+
+#define INTERNAL_PLATFORM_WRITE_ENTIRE_FILE(name) bool32 name(char *Filename, uint32_t MemorySize, void *Memory)
+typedef INTERNAL_PLATFORM_WRITE_ENTIRE_FILE(INTERNAL_platform_write_entire_file);
+
 #endif
 
 
 /**************************************************************/
-/*Services that the application provides to the platform layer*/
+/*Services/data that the application provides to the platform layer*/
 /**************************************************************/
 
 struct application_offscreen_buffer 
@@ -123,6 +150,11 @@ struct application_input
     //TODO: add clocks here?
     application_input_device Controllers[5]; // Controller 0 = Keyboard, 1-4 = other XInput devices
 };
+inline application_input_device *GetController(application_input *Input, uint32_t ControllerIndex)
+{
+    Assert(ControllerIndex < ArrayCount(Input->Controllers));
+    return(&Input->Controllers[ControllerIndex]);
+}
 
 struct application_memory
 {
@@ -135,16 +167,30 @@ struct application_memory
 
     //IMPORTANT: MUST BE CLEARED TO ZERO AT STARTUP!
     void *TransientStorage;
+
+    INTERNAL_platform_free_file_memory *INTERNAL_PlatformFreeFileMemory;
+    INTERNAL_platform_read_entire_file *INTERNAL_PlatformReadEntireFile;
+    INTERNAL_platform_write_entire_file *INTERNAL_PlatformWriteEntireFile;
 };
 
 
-internal void ApplicationUpdate(application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input);
-internal void ApplicationGetSoundForFrame(application_memory *Memory, application_sound_output_buffer *Buffer);
+#define APPLICATION_UPDATE(name) void name(application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input)
+typedef APPLICATION_UPDATE(application_update);
+APPLICATION_UPDATE(ApplicationUpdateStub)
+{
+}
+
+#define APPLICATION_GET_SOUND(name) void name(application_memory *Memory, application_sound_output_buffer *Buffer)
+typedef APPLICATION_GET_SOUND(application_get_sound);
+APPLICATION_GET_SOUND(ApplicationGetSoundStub)
+{
+}
 
 // this does not need to be visible to Win32....
 struct application_state
 {
     int32_t ToneHz;
+    float32 tSine;
     int32_t BlueOffset;
     int32_t GreenOffset;
 };
