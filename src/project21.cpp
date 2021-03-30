@@ -4,7 +4,7 @@ internal void
 ApplicationOutputSound(application_sound_output_buffer *SoundBuffer, int ToneHz)
 {
     local_persist float32 tSine;
-    int16_t ToneVol = 3000;
+    int16_t ToneVol = 256;
     int32_t WavePeriod = SoundBuffer->SamplesPerSecond / ToneHz;
     
     int16_t *SampleOut = SoundBuffer->Memory;
@@ -16,6 +16,10 @@ ApplicationOutputSound(application_sound_output_buffer *SoundBuffer, int ToneHz)
         *SampleOut++ = SampleValue;
         
         tSine += (2.0f*Pi32)/(float32)WavePeriod;
+        if(tSine > (2.0f*Pi32))
+        {
+            tSine = 0;
+        }
     }
 }
 
@@ -60,7 +64,6 @@ internal application_state *ApplicationStartup(void)
 internal void
 ApplicationUpdate(application_memory *Memory,
                   application_offscreen_buffer *BitmapBuffer, 
-                  application_sound_output_buffer *SoundBuffer,
                   application_input *Input)
 {
     Assert(sizeof(application_state) <= Memory->PermanentStorageSize);
@@ -78,7 +81,7 @@ ApplicationUpdate(application_memory *Memory,
         }
 #endif // file IO testing
         
-        State->ToneHz = 256;
+        State->ToneHz = 1024;
         Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
     }
 
@@ -90,7 +93,7 @@ ApplicationUpdate(application_memory *Memory,
         if(Controller->IsAnalog)
         {
             // Use analog movement tuning
-            State->ToneHz = 256 + (int32_t)(128.0f*(Controller->LStickAverageY));
+            State->ToneHz = 1024 + (int32_t)(128.0f*(Controller->LStickAverageY));
             State->BlueOffset -= (int32_t)(4.0f*(Controller->LStickAverageX));
         }
         else
@@ -118,6 +121,12 @@ ApplicationUpdate(application_memory *Memory,
         }
     }
 
-    ApplicationOutputSound(SoundBuffer, State->ToneHz);
     RenderGradient(BitmapBuffer, State->BlueOffset, State->GreenOffset);
+}
+
+internal void 
+ApplicationGetSoundForFrame(application_memory *Memory, application_sound_output_buffer *Buffer)
+{
+    application_state *State = (application_state *)Memory->PermanentStorage;
+    ApplicationOutputSound(Buffer, State->ToneHz);
 }

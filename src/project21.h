@@ -14,6 +14,9 @@
 /*     Utilities     */
 /*********************/
 
+//IMPORTANT take this out ASAP
+#define PROJECT21_INTERNAL 1 // for now, so VSC stops being a bitch
+
 
 #if PROJECT21_SLOW
 #define Assert(Expression) if(!(Expression)) { *(int *)0 = 0; }
@@ -135,10 +138,8 @@ struct application_memory
 };
 
 
-internal void ApplicationUpdate(application_memory *Memory,
-                                application_offscreen_buffer *Buffer, 
-                                application_sound_output_buffer *SoundBuffer,
-                                application_input *Input);
+internal void ApplicationUpdate(application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input);
+internal void ApplicationGetSoundForFrame(application_memory *Memory, application_sound_output_buffer *Buffer);
 
 // this does not need to be visible to Win32....
 struct application_state

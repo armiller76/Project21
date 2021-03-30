@@ -23,6 +23,7 @@ struct win32_sound_output
     uint32_t SampleIndex;
     uint32_t BytesPerSample;
     uint32_t BufferSize;
+    uint32_t SafetyBytes;
     float32 tSine;
     int32_t LatencySampleCount;
 };
@@ -30,8 +31,14 @@ struct win32_sound_output
 #if PROJECT21_INTERNAL
 struct INTERNAL_time_marker
 {
-    DWORD PlayCursor;
-    DWORD WriteCursor;
+    DWORD OutputPlayCursor;
+    DWORD OutputWriteCursor;
+    DWORD OutputByte;
+    DWORD OutputByteCount;
+    
+    DWORD ExpectedFlipCursor;
+    DWORD FlipPlayCursor;
+    DWORD FlipWriteCursor;
 };
 #endif
 
