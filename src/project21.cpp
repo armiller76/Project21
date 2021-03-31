@@ -10,7 +10,7 @@ ApplicationOutputSound(application_state *State, application_sound_output_buffer
     int16_t *SampleOut = SoundBuffer->Memory;
     for(int32_t SampleIndex = 0; SampleIndex < SoundBuffer->SampleCount; ++SampleIndex)
     {
-#if 0        
+#if 1        
         float32 SineValue = sinf(State->tSine);
         int16_t SampleValue = (int16_t)(SineValue * ToneVol);
 #else
@@ -64,7 +64,7 @@ RenderGradient(application_offscreen_buffer *Buffer, int XOffset, int YOffset)
         {
             uint8_t Blue = (uint8_t)(X + XOffset);
             uint8_t Green = (uint8_t)(Y + YOffset);
-            *Pixel++ = ((Green << 16) | Blue);
+            *Pixel++ = ((Green << 8) | Blue);
         }
         Row += Buffer->Pitch;
     }

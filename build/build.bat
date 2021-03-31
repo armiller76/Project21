@@ -1,10 +1,10 @@
 @echo off
 
 REM Common compiler flags:
-set CommonCompilerFlags= -MT -nologo -EHa- -Gm- -GR- -Oi -WX -W4 -wd4201 -wd4100 -wd4189 -Z7 
+set CommonCompilerFlags= -MTd -nologo -EHa- -Gm- -GR- -Oi -WX -W4 -wd4201 -wd4100 -wd4189 -Z7 
 
 set PlatformLinkerArgs= -incremental:no -opt:ref user32.lib gdi32.lib winmm.lib
-set ApplicationLinkerFlags= -incremental:no -EXPORT:ApplicationUpdate -EXPORT:ApplicationGetSound -PDB:project21_%date:~-4,4%%date:~-10,2%%date:~-7,2%_%time:~0,2%%time:~3,2%%time:~6,2%.pdb
+set ApplicationLinkerFlags= -incremental:no -EXPORT:ApplicationUpdate -EXPORT:ApplicationGetSound -PDB:project21_%random%.pdb
 
 REM 64 bit build:
 del *.pdb >nul 2>nul

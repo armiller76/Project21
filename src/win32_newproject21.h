@@ -1,5 +1,7 @@
 #ifndef WIN32_NEWPROJECT21_H
 
+#define WIN32_FILENAME_MAX_COUNT MAX_PATH
+
 struct win32_offscreen_buffer
 {
     BITMAPINFO BitmapInfo;
@@ -32,25 +34,31 @@ struct win32_application
 {
     HMODULE Library;
     FILETIME LastLibraryUpdateTime;
+    
+    //IMPORTANT: Can be set to 0 if pointer cannot be found - guard usage with if(n.Update)
     application_update *Update;
+    //IMPORTANT: Can be set to 0 if pointer cannot be found - guard usage with if(n.Update)
     application_get_sound *GetSound;
     
     bool32 Valid;
 };
 
-#if PROJECT21_INTERNAL
-struct INTERNAL_win32_platform_state
+struct win32_platform_state
 {
     void *ApplicationMemoryBase;
-    uint64_t ApplicationMemorySize;
+    uint64_t ApplicationTotalMemorySize;
 
     HANDLE RecordingHandle;
     uint32_t InputRecordingIndex;
 
     HANDLE PlaybackHandle;
     uint32_t InputPlaybackIndex;
+
+    char EXEFilename[WIN32_FILENAME_MAX_COUNT];
+    char *AfterLastSlash;
 };
 
+#if PROJECT21_INTERNAL
 struct INTERNAL_time_marker
 {
     DWORD OutputPlayCursor;

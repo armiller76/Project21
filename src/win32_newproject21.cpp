@@ -45,6 +45,54 @@ Win32GetSecondsElapsed(LARGE_INTEGER Start, LARGE_INTEGER End)
     return(Result);
 }
 
+internal void
+StringCat(char *SourceA, size_t SourceACount, char *SourceB, size_t SourceBCount, char *Destination, size_t DestinationCount)
+{
+    
+    //TODO: Bounds checking
+    for(uint32_t Index = 0; Index < SourceACount; ++Index)
+    {
+        *Destination++ = *SourceA++;
+    }
+    for(uint32_t Index = 0; Index < SourceBCount; ++Index)
+    {
+        *Destination++ = *SourceB++;
+    }
+    *Destination = 0;
+}
+
+internal uint32_t
+StringLength(char* String)
+{
+    uint32_t Result = 0;
+    while(*String++)
+    {
+        ++Result;
+    }
+    return(Result);
+}
+
+internal void
+Win32GetEXEFilenameAndPath(win32_platform_state *State)
+{
+    DWORD SizeOfFilename = GetModuleFileName(0, State->EXEFilename, sizeof(State->EXEFilename));
+    State->AfterLastSlash = State->EXEFilename;
+    for(char *Scanner = State->EXEFilename; *Scanner; ++Scanner)
+    {
+        if(*Scanner == '\\')
+        {
+            State->AfterLastSlash = Scanner + 1;
+        }
+    }
+}
+
+internal void
+Win32AddPathToBuildDirectory(win32_platform_state *State, char *Filename, char *Destination, uint32_t DestCount)
+{
+    //TODO: check if pointers are valid??
+    StringCat(State->EXEFilename, State->AfterLastSlash - State->EXEFilename, Filename, StringLength(Filename), Destination, DestCount);
+}
+
 INTERNAL_PLATFORM_FREE_FILE_MEMORY(INTERNAL_PlatformFreeFileMemory) // parameters: (void *Bitmapmemory)
 {
     if(Bitmapmemory)
@@ -139,13 +187,11 @@ inline FILETIME
 Win32GetLastWriteTime(char *Filename)
 {
     FILETIME Result = {};
+    WIN32_FILE_ATTRIBUTE_DATA FileData;
 
-    WIN32_FIND_DATA FindData;
-    HANDLE Handle = FindFirstFile(Filename, &FindData);
-    if(Handle)
+    if(GetFileAttributesEx(Filename, GetFileExInfoStandard, &FileData))
     {
-        Result = FindData.ftLastWriteTime;
-        FindClose(Handle);
+        Result = FileData.ftLastWriteTime;
     }
 
     return(Result);
@@ -171,8 +217,8 @@ Win32LoadApplication(char *LibraryFilename, char *CopiedFilename)
 
     if(!Result.Valid)
     {
-        Result.Update = ApplicationUpdateStub;
-        Result.GetSound = ApplicationGetSoundStub;
+        Result.Update = 0;
+        Result.GetSound = 0;
     }
 
     return(Result);
@@ -187,8 +233,8 @@ WIN32UnloadApplicationLibrary(win32_application *Application)
         Application->Library = 0;
     }
     Application->Valid = false;
-    Application->GetSound = ApplicationGetSoundStub;
-    Application->Update = ApplicationUpdateStub;
+    Application->GetSound = 0;
+    Application->Update = 0;
 }
 
 internal void
@@ -503,56 +549,69 @@ INTERNAL_Win32DrawAudioSync(win32_offscreen_buffer *BackBuffer, uint32_t CursorC
 }
 
 internal void
-Win32BeginInputRecording(INTERNAL_win32_platform_state *Platform, uint32_t RecordingIndex)
+Win32GetInputFilename(win32_platform_state *State, int32_t RecordedSlotIndex, char *Destination, uint32_t DestCount)
 {
-    char *Filename = "project21.dil"; //dil = debug input log
+    Assert(RecordedSlotIndex == 1); // for now
+    Win32AddPathToBuildDirectory(State, "project21_loop.dil", Destination, DestCount);
+}
 
+internal void
+Win32BeginInputRecording(win32_platform_state *Platform, uint32_t RecordingIndex)
+{
     Platform->InputRecordingIndex = RecordingIndex;
-    Platform->RecordingHandle = CreateFile(Filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
 
+    char Filename[WIN32_FILENAME_MAX_COUNT];
+    Win32GetInputFilename(Platform, RecordingIndex, Filename, sizeof(Filename)); 
+
+    DWORD Ignored;
+    Platform->RecordingHandle = CreateFile(Filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+    DeviceIoControl(Platform->RecordingHandle, FSCTL_SET_SPARSE, 0, 0, 0, 0, &Ignored, 0);
+
+    DWORD BytesToWrite = (DWORD)(Platform->ApplicationTotalMemorySize);
+    Assert(Platform->ApplicationTotalMemorySize == BytesToWrite); // if we ever get to where memory usage goes over 4GB, we'll have to revisit this
     DWORD BytesWritten;
-    DWORD BytesToWrite = (DWORD)(Platform->ApplicationMemorySize);
-    Assert(Platform->ApplicationMemorySize == BytesToWrite); // if we ever get to where memory usage goes over 4GB, we'll have to revisit this
     WriteFile(Platform->RecordingHandle, Platform->ApplicationMemoryBase, BytesToWrite, &BytesWritten, 0);
 }
 
 internal void
-Win32EndInputRecording(INTERNAL_win32_platform_state *Platform)
+Win32BeginInputPlayback(win32_platform_state *Platform, uint32_t PlaybackIndex)
+{
+    Platform->InputPlaybackIndex = PlaybackIndex;
+
+    char Filename[WIN32_FILENAME_MAX_COUNT];
+    Win32GetInputFilename(Platform, PlaybackIndex, Filename, sizeof(Filename)); 
+
+    Platform->PlaybackHandle = CreateFile(Filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+
+    DWORD BytesRead;
+    DWORD BytesToRead = (DWORD)Platform->ApplicationTotalMemorySize;
+    Assert(Platform->ApplicationTotalMemorySize == BytesToRead); // if we ever get to where memory usage goes over 4GB, we'll have to revisit this
+    ReadFile(Platform->PlaybackHandle, Platform->ApplicationMemoryBase, BytesToRead, &BytesRead, 0);
+}
+
+internal void
+Win32EndInputRecording(win32_platform_state *Platform)
 {
     CloseHandle(Platform->RecordingHandle);
     Platform->InputRecordingIndex = 0;
 }
 
 internal void
-Win32BeginInputPlayback(INTERNAL_win32_platform_state *Platform, uint32_t PlaybackIndex)
-{
-    char *Filename = "project21.dil"; //dil = debug input log
-
-    Platform->InputPlaybackIndex = PlaybackIndex;
-    Platform->PlaybackHandle = CreateFile(Filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
-
-    DWORD BytesRead;
-    DWORD BytesToRead = (DWORD)Platform->ApplicationMemorySize;
-    Assert(Platform->ApplicationMemorySize == BytesToRead); // if we ever get to where memory usage goes over 4GB, we'll have to revisit this
-    ReadFile(Platform->PlaybackHandle, Platform->ApplicationMemoryBase, BytesToRead, &BytesRead, 0);
-}
-
-internal void
-Win32EndInputPlayback(INTERNAL_win32_platform_state *Platform)
+Win32EndInputPlayback(win32_platform_state *Platform)
 {
     CloseHandle(Platform->PlaybackHandle);
     Platform->InputPlaybackIndex = 0;
 }
 
 internal void
-Win32RecordInput(INTERNAL_win32_platform_state *Platform, application_input *Input)
+Win32RecordInput(win32_platform_state *Platform, application_input *Input)
 {
     DWORD BytesWritten;
     WriteFile(Platform->RecordingHandle, Input, sizeof(*Input), &BytesWritten, 0);
 }
 
 internal void
-Win32PlaybackInput(INTERNAL_win32_platform_state *Platform, application_input *Input)
+Win32PlaybackInput(win32_platform_state *Platform, application_input *Input)
 {
     DWORD BytesRead = 0;
     if(ReadFile(Platform->PlaybackHandle, Input, sizeof(*Input), &BytesRead, 0))
@@ -569,7 +628,7 @@ Win32PlaybackInput(INTERNAL_win32_platform_state *Platform, application_input *I
 #endif
 
 internal void
-Win32ProcessWindowsMessages(INTERNAL_win32_platform_state *Platform, application_input_device *Keyboard)
+Win32ProcessWindowsMessages(win32_platform_state *Platform, application_input_device *Keyboard)
 {
     // Windows message loop
     MSG Message;    
@@ -711,6 +770,7 @@ Win32MainWindowCallback(HWND Window,
 
         case WM_ACTIVATEAPP:
         {
+#if 0
             if(WParam == TRUE)
             {
                 SetLayeredWindowAttributes(Window, RGB(0, 0, 0), 255, LWA_ALPHA);
@@ -719,6 +779,7 @@ Win32MainWindowCallback(HWND Window,
             {
                 SetLayeredWindowAttributes(Window, RGB(0, 0, 0), 96, LWA_ALPHA);
             }
+#endif
         } break;
 
         case WM_SYSKEYDOWN:
@@ -750,45 +811,22 @@ Win32MainWindowCallback(HWND Window,
     return (Result);
 }
 
-internal void
-Concatenate(char *SourceA, size_t SourceACount, char *SourceB, size_t SourceBCount, char *Destination, size_t DestinationCount)
-{
-    
-    //TODO: Bounds checking
-    for(uint32_t Index = 0; Index < SourceACount; ++Index)
-    {
-        *Destination++ = *SourceA++;
-    }
-    for(uint32_t Index = 0; Index < SourceBCount; ++Index)
-    {
-        *Destination++ = *SourceB++;
-    }
-    *Destination = 0;
-}
-
 int CALLBACK
 WinMain(HINSTANCE Instance,
         HINSTANCE PrevInstance,
         LPSTR CommandLine,
         int ShowCode)
 {
-    char MyExecutableFilename[MAX_PATH];
-    DWORD SizeOfMyExecutableFilename = GetModuleFileName(0, MyExecutableFilename, sizeof(MyExecutableFilename));
-    char *LastSlash = MyExecutableFilename;
-    for(char *Scanner = MyExecutableFilename; *Scanner; ++Scanner)
-    {
-        if(*Scanner == '\\')
-        {
-            LastSlash = Scanner + 1;
-        }
-    }
+    win32_platform_state Platform = {};
+    Win32GetEXEFilenameAndPath(&Platform);
 
     char ApplicationDLLFilename[] = "project21.dll";
-    char ApplicationDLLFullPath[MAX_PATH];
-    Concatenate(MyExecutableFilename, LastSlash - MyExecutableFilename, ApplicationDLLFilename, sizeof(ApplicationDLLFilename) - 1, ApplicationDLLFullPath, sizeof(ApplicationDLLFullPath));
+    char ApplicationDLLFullPath[WIN32_FILENAME_MAX_COUNT];
+    Win32AddPathToBuildDirectory(&Platform, ApplicationDLLFilename, ApplicationDLLFullPath, sizeof(ApplicationDLLFullPath));
+
     char CopiedDLLFilename[] = "project21_.dll";
-    char CopiedDLLFullPath[MAX_PATH];
-    Concatenate(MyExecutableFilename, LastSlash - MyExecutableFilename, CopiedDLLFilename, sizeof(CopiedDLLFilename) - 1, CopiedDLLFullPath, sizeof(CopiedDLLFullPath));
+    char CopiedDLLFullPath[WIN32_FILENAME_MAX_COUNT];
+    Win32AddPathToBuildDirectory(&Platform, CopiedDLLFilename, CopiedDLLFullPath, sizeof(CopiedDLLFullPath));
 
     LARGE_INTEGER PerformanceCounterFrequency;
     QueryPerformanceFrequency(&PerformanceCounterFrequency);
@@ -820,7 +858,7 @@ WinMain(HINSTANCE Instance,
     {
         HWND Window = CreateWindowExW
         (
-            WS_EX_TOPMOST|WS_EX_LAYERED,    // DWORD dwExStyle,
+            0,//WS_EX_TOPMOST|WS_EX_LAYERED,    // DWORD dwExStyle,
             WindowClass.lpszClassName,      // LPCWSTR lpClassName,
             (LPCWSTR)"Project21",           // LPCWSTR lpWindowName,
             WS_OVERLAPPEDWINDOW|WS_VISIBLE, // DWORD dwStyle,
@@ -855,13 +893,12 @@ WinMain(HINSTANCE Instance,
             Win32ClearSoundBuffer(&SoundOutput);
             GlobalAudioBuffer->Play(0, 0, DSBPLAY_LOOPING);
 
-            INTERNAL_win32_platform_state Platform = {};
             application_memory ApplicationMemory = {};
 
             ApplicationMemory.PermanentStorageSize = Megabytes(64);
             ApplicationMemory.TransientStorageSize = Gigabytes(1);
-            Platform.ApplicationMemorySize = ApplicationMemory.PermanentStorageSize + ApplicationMemory.TransientStorageSize;
-            Platform.ApplicationMemoryBase = VirtualAlloc(PermanentStorageBaseAddress, Platform.ApplicationMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+            Platform.ApplicationTotalMemorySize = ApplicationMemory.PermanentStorageSize + ApplicationMemory.TransientStorageSize;
+            Platform.ApplicationMemoryBase = VirtualAlloc(PermanentStorageBaseAddress, Platform.ApplicationTotalMemorySize, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);
             ApplicationMemory.PermanentStorage = Platform.ApplicationMemoryBase;
             ApplicationMemory.TransientStorage = ((uint8_t *)(ApplicationMemory.PermanentStorage) + ApplicationMemory.PermanentStorageSize); 
 
@@ -940,6 +977,8 @@ WinMain(HINSTANCE Instance,
                             {
                                 XINPUT_GAMEPAD *GP = &ControllerState.Gamepad;
                                 NewControllerState->IsConnected = true;
+                                NewControllerState->IsAnalog = OldControllerState->IsAnalog;
+
                                 if((NewControllerState->LStickAverageX != 0.0f) || (NewControllerState->LStickAverageY != 0.0f))
                                 {
                                     NewControllerState->IsAnalog = true;
@@ -1028,12 +1067,15 @@ WinMain(HINSTANCE Instance,
                             Win32PlaybackInput(&Platform, InputThisFrame);
                         }
 #endif                        
-                        Application.Update(&ApplicationMemory, &ApplicationOffscreenBuffer, InputThisFrame);
+                        if(Application.Update)
+                        {
+                            Application.Update(&ApplicationMemory, &ApplicationOffscreenBuffer, InputThisFrame);
+                        }
 
                         LARGE_INTEGER AudioWallClock = Win32GetWallClock();
-                        float64 SecondsSinceFrameFlip = Win32GetSecondsElapsed(FrameFlipWallClock, AudioWallClock);
                         DWORD PlayCursor;
                         DWORD WriteCursor;
+                        float32 SecondsElapsedSinceFrameFlip = Win32GetSecondsElapsed(FrameFlipWallClock, AudioWallClock);
 
                         if(GlobalAudioBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor) == DS_OK)
                         {
@@ -1044,12 +1086,12 @@ WinMain(HINSTANCE Instance,
                             }
 
                             DWORD ByteToLock = ((SoundOutput.SampleIndex*SoundOutput.BytesPerSample) % SoundOutput.BufferSize);
-                            
                             DWORD ExpectedAudioBytesPerFrame =  (SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample) / DEFINEDGameUpdateHz;
-                            DWORD ExpectedBytesUntilFrameFlip = (DWORD)(((TargetSecondsElapsedPerFrame - SecondsSinceFrameFlip) / (float32)TargetSecondsElapsedPerFrame) * (float32)ExpectedAudioBytesPerFrame);
-
-                            DWORD ExpectedFrameBoundaryByte = PlayCursor + ExpectedAudioBytesPerFrame ;
+                            float32 SecondsUntilFrameFlip = TargetSecondsElapsedPerFrame - SecondsElapsedSinceFrameFlip;
+                            DWORD ExpectedBytesUntilFrameFlip = (DWORD)((SecondsUntilFrameFlip/TargetSecondsElapsedPerFrame) * (float32)ExpectedAudioBytesPerFrame);
+                            DWORD ExpectedFrameBoundaryByte = PlayCursor + ExpectedBytesUntilFrameFlip;
                             DWORD SafeWriteCursor = WriteCursor;
+
                             if(SafeWriteCursor < PlayCursor)
                             {
                                 SafeWriteCursor += SoundOutput.BufferSize;
@@ -1079,12 +1121,16 @@ WinMain(HINSTANCE Instance,
                             {
                                 BytesToWrite = TargetCursor - ByteToLock;
                             }
+                            
                             application_sound_output_buffer ApplicationSoundBuffer = {};
                             ApplicationSoundBuffer.SamplesPerSecond = SoundOutput.SamplesPerSecond;
                             ApplicationSoundBuffer.SampleCount = BytesToWrite / SoundOutput.BytesPerSample;
                             ApplicationSoundBuffer.Memory = AllocatedAudioBufferMemory;
-                            Application.GetSound(&ApplicationMemory, &ApplicationSoundBuffer);
-                        
+                            if(Application.GetSound)
+                            {
+                                Application.GetSound(&ApplicationMemory, &ApplicationSoundBuffer);
+                            }
+
     #if PROJECT21_INTERNAL
                             INTERNAL_time_marker *Marker = &DEBUGAudioCursors[DEBUGAudioCursorIndex];
                             Marker->OutputPlayCursor = PlayCursor;

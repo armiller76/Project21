@@ -180,15 +180,9 @@ struct application_memory
 
 #define APPLICATION_UPDATE(name) void name(application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input)
 typedef APPLICATION_UPDATE(application_update);
-APPLICATION_UPDATE(ApplicationUpdateStub)
-{
-}
 
 #define APPLICATION_GET_SOUND(name) void name(application_memory *Memory, application_sound_output_buffer *Buffer)
 typedef APPLICATION_GET_SOUND(application_get_sound);
-APPLICATION_GET_SOUND(ApplicationGetSoundStub)
-{
-}
 
 // this does not need to be visible to Win32....
 struct application_state
