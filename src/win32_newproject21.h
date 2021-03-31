@@ -39,6 +39,18 @@ struct win32_application
 };
 
 #if PROJECT21_INTERNAL
+struct INTERNAL_win32_platform_state
+{
+    void *ApplicationMemoryBase;
+    uint64_t ApplicationMemorySize;
+
+    HANDLE RecordingHandle;
+    uint32_t InputRecordingIndex;
+
+    HANDLE PlaybackHandle;
+    uint32_t InputPlaybackIndex;
+};
+
 struct INTERNAL_time_marker
 {
     DWORD OutputPlayCursor;

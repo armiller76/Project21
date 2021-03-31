@@ -32,6 +32,9 @@
 #define COLOR_YELLOW    0xFFFFFF00
 #define COLOR_BLACK     0xFF000000
 
+#define PROJECT21_WINDOWWIDTH 1280
+#define PROJECT21_WINDOWHEIGHT 720
+
 #define Pi32 3.14159265359f
 
 typedef float float32;
@@ -91,6 +94,7 @@ struct application_offscreen_buffer
     int32_t Width;
     int32_t Height;
     int32_t Pitch;
+    int32_t BytesPerPixel;
 };
 
 struct application_sound_output_buffer
@@ -193,6 +197,10 @@ struct application_state
     float32 tSine;
     int32_t BlueOffset;
     int32_t GreenOffset;
+
+    int32_t PlayerX;
+    int32_t PlayerY;
+    float32 tAction;
 };
 
 #define PROJECT21_H

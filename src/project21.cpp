@@ -10,8 +10,12 @@ ApplicationOutputSound(application_state *State, application_sound_output_buffer
     int16_t *SampleOut = SoundBuffer->Memory;
     for(int32_t SampleIndex = 0; SampleIndex < SoundBuffer->SampleCount; ++SampleIndex)
     {
+#if 0        
         float32 SineValue = sinf(State->tSine);
         int16_t SampleValue = (int16_t)(SineValue * ToneVol);
+#else
+        int16_t SampleValue = 0;
+#endif
         *SampleOut++ = SampleValue;
         *SampleOut++ = SampleValue;
         
@@ -19,6 +23,27 @@ ApplicationOutputSound(application_state *State, application_sound_output_buffer
         if(State->tSine > (2.0f*Pi32))
         {
             State->tSine -= 2.0f*Pi32;
+        }
+    }
+}
+
+internal void
+RenderPlayer(application_state *State, application_offscreen_buffer *BackBuffer, uint32_t Color)
+{
+    uint8_t *EndOfBuffer = (uint8_t *)BackBuffer->Memory + BackBuffer->Pitch*BackBuffer->Height;
+    
+    int32_t Top = State->PlayerY;
+    int32_t Bottom = State->PlayerY + 10;
+    for(int32_t X = State->PlayerX; X < State->PlayerX + 10; ++X)
+    {
+        uint8_t *Pixel = (uint8_t *)BackBuffer->Memory + Top*BackBuffer->Pitch + X*BackBuffer->BytesPerPixel;
+        for(int32_t Y = Top; Y < Bottom; ++Y)
+        {
+            if((Pixel >= BackBuffer->Memory) && (Pixel < EndOfBuffer))
+            {
+                *(uint32_t *)Pixel = Color;
+            }
+            Pixel += BackBuffer->Pitch;
         }
     }
 }
@@ -63,6 +88,9 @@ extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, a
         }
 #endif // file IO testing
         
+        State->PlayerX = 100;
+        State->PlayerY = 100;
+        
         State->ToneHz = 1024;
         State->tSine = 0;
         Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
@@ -77,34 +105,27 @@ extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, a
         {
             // Use analog movement tuning
             State->ToneHz = 1024 + (int32_t)(128.0f*(Controller->LStickAverageY));
-            State->BlueOffset -= (int32_t)(4.0f*(Controller->LStickAverageX));
         }
         else
         {
             // Use digital movement tuning
-            if(Controller->MoveRight.EndedDown)
-            {
-                --State->BlueOffset;
-            }
-
-            if(Controller->MoveLeft.EndedDown)
-            {
-                ++State->BlueOffset;
-            }
-
-            if(Controller->MoveUp.EndedDown)
-            {
-                ++State->GreenOffset;
-            }
-
-            if(Controller->MoveDown.EndedDown)
-            {
-                --State->GreenOffset;
-            }
         }
+
+        State->PlayerX += (int32_t)(4.0f*Controller->LStickAverageX);
+        State->PlayerY -= (int32_t)(4.0f*Controller->LStickAverageY);
+        if(State->tAction > 0)
+        {
+             State->PlayerY += (int32_t)(5.0f*sinf(0.5f*Pi32*State->tAction));
+        }
+        if(Controller->ActionDown.EndedDown)
+        {
+            State->tAction = 4.0f;
+        }
+        State->tAction -= 0.033f;
     }
 
     RenderGradient(Buffer, State->BlueOffset, State->GreenOffset);
+    RenderPlayer(State, Buffer, COLOR_MAGENTA);
 }
 
 extern "C" APPLICATION_GET_SOUND(ApplicationGetSound) // parameters: (application_memory *Memory, application_sound_output_buffer *Buffer)

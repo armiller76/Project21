@@ -501,10 +501,75 @@ INTERNAL_Win32DrawAudioSync(win32_offscreen_buffer *BackBuffer, uint32_t CursorC
         INTERNAL_Win32DrawAudioCursor(BackBuffer, SoundOutput, ScreenToBufferRatio, PadX, Top, Bottom, Marker->FlipPlayCursor + 480*SoundOutput->BytesPerSample, WindowColor);
     }
 }
+
+internal void
+Win32BeginInputRecording(INTERNAL_win32_platform_state *Platform, uint32_t RecordingIndex)
+{
+    char *Filename = "project21.dil"; //dil = debug input log
+
+    Platform->InputRecordingIndex = RecordingIndex;
+    Platform->RecordingHandle = CreateFile(Filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+
+    DWORD BytesWritten;
+    DWORD BytesToWrite = (DWORD)(Platform->ApplicationMemorySize);
+    Assert(Platform->ApplicationMemorySize == BytesToWrite); // if we ever get to where memory usage goes over 4GB, we'll have to revisit this
+    WriteFile(Platform->RecordingHandle, Platform->ApplicationMemoryBase, BytesToWrite, &BytesWritten, 0);
+}
+
+internal void
+Win32EndInputRecording(INTERNAL_win32_platform_state *Platform)
+{
+    CloseHandle(Platform->RecordingHandle);
+    Platform->InputRecordingIndex = 0;
+}
+
+internal void
+Win32BeginInputPlayback(INTERNAL_win32_platform_state *Platform, uint32_t PlaybackIndex)
+{
+    char *Filename = "project21.dil"; //dil = debug input log
+
+    Platform->InputPlaybackIndex = PlaybackIndex;
+    Platform->PlaybackHandle = CreateFile(Filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+
+    DWORD BytesRead;
+    DWORD BytesToRead = (DWORD)Platform->ApplicationMemorySize;
+    Assert(Platform->ApplicationMemorySize == BytesToRead); // if we ever get to where memory usage goes over 4GB, we'll have to revisit this
+    ReadFile(Platform->PlaybackHandle, Platform->ApplicationMemoryBase, BytesToRead, &BytesRead, 0);
+}
+
+internal void
+Win32EndInputPlayback(INTERNAL_win32_platform_state *Platform)
+{
+    CloseHandle(Platform->PlaybackHandle);
+    Platform->InputPlaybackIndex = 0;
+}
+
+internal void
+Win32RecordInput(INTERNAL_win32_platform_state *Platform, application_input *Input)
+{
+    DWORD BytesWritten;
+    WriteFile(Platform->RecordingHandle, Input, sizeof(*Input), &BytesWritten, 0);
+}
+
+internal void
+Win32PlaybackInput(INTERNAL_win32_platform_state *Platform, application_input *Input)
+{
+    DWORD BytesRead = 0;
+    if(ReadFile(Platform->PlaybackHandle, Input, sizeof(*Input), &BytesRead, 0))
+    {
+        if(BytesRead == 0)
+        {
+            uint32_t PlayingIndex = Platform->InputPlaybackIndex;
+            Win32EndInputPlayback(Platform);
+            Win32BeginInputPlayback(Platform, PlayingIndex);
+            ReadFile(Platform->PlaybackHandle, Input, sizeof(*Input), &BytesRead, 0);
+        }
+    }
+}
 #endif
 
 internal void
-Win32ProcessWindowsMessages(application_input_device *Keyboard)
+Win32ProcessWindowsMessages(INTERNAL_win32_platform_state *Platform, application_input_device *Keyboard)
 {
     // Windows message loop
     MSG Message;    
@@ -583,6 +648,22 @@ Win32ProcessWindowsMessages(application_input_device *Keyboard)
                             GlobalPause = !GlobalPause;
                         }
                     }
+                    else if(VKCode == 'L')
+                    {
+                        if(IsDown)
+                        {
+                            if(Platform->InputRecordingIndex == 0)
+                            {
+                                Win32BeginInputRecording(Platform, 1);
+                            }
+                            else
+                            {
+                                Win32EndInputRecording(Platform);
+                                Win32BeginInputPlayback(Platform, 1);
+                            }
+                        }
+                    }
+                    
 #endif
                 }
                 bool32 AltKeyWasDown = (Message.lParam & (1 << 29));
@@ -630,6 +711,14 @@ Win32MainWindowCallback(HWND Window,
 
         case WM_ACTIVATEAPP:
         {
+            if(WParam == TRUE)
+            {
+                SetLayeredWindowAttributes(Window, RGB(0, 0, 0), 255, LWA_ALPHA);
+            }
+            else
+            {
+                SetLayeredWindowAttributes(Window, RGB(0, 0, 0), 96, LWA_ALPHA);
+            }
         } break;
 
         case WM_SYSKEYDOWN:
@@ -713,7 +802,7 @@ WinMain(HINSTANCE Instance,
     bool32 SleepIsGranular = (RequestResult == TIMERR_NOERROR);
 
     Win32InitializeXInput();
-    Win32InitializeBackbuffer(&GlobalBackbuffer, 1280, 720);
+    Win32InitializeBackbuffer(&GlobalBackbuffer, PROJECT21_WINDOWWIDTH, PROJECT21_WINDOWHEIGHT);
 
     WNDCLASSW WindowClass = {};
     WindowClass.style = CS_VREDRAW|CS_HREDRAW;                  // UINT        style;
@@ -731,34 +820,34 @@ WinMain(HINSTANCE Instance,
     {
         HWND Window = CreateWindowExW
         (
-            0,                              // DWORD dwExStyle,
+            WS_EX_TOPMOST|WS_EX_LAYERED,    // DWORD dwExStyle,
             WindowClass.lpszClassName,      // LPCWSTR lpClassName,
             (LPCWSTR)"Project21",           // LPCWSTR lpWindowName,
             WS_OVERLAPPEDWINDOW|WS_VISIBLE, // DWORD dwStyle,
             CW_USEDEFAULT,                  // int X,
             CW_USEDEFAULT,                  // int Y,
-            CW_USEDEFAULT,                  // int nWidth,
-            CW_USEDEFAULT,                  // int nHeight,
+            PROJECT21_WINDOWWIDTH,          // int nWidth,
+            PROJECT21_WINDOWHEIGHT,         // int nHeight,
             0,                              // HWND hWndParent,
             0,                              // HMENU hMenu,
             Instance,                       // HINSTANCE hInstance,
             0);                             // LPVOID lpParam
         if(Window)
         {
-            // temporary/debug variables
-            int tmpXOffset = 0;  //graphics test
-            int tmpYOffset = 0;  //graphics test
-
-            // sound test: init DirectSound, fill buffer w/ sine wave, and play
+#if PROJECT21_INTERNAL
+            LPVOID PermanentStorageBaseAddress = (LPVOID)Terabytes((uint64_t)2);
+#else   
+            LPVOID PermanentStorageBaseAddress = 0;
+#endif
+            
             win32_sound_output SoundOutput = {};
-            SoundOutput.BytesPerSample = sizeof(int16_t)*2;
             SoundOutput.SamplesPerSecond = 48000;
+            SoundOutput.BytesPerSample = sizeof(int16_t)*2;
+            SoundOutput.BufferSize = SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample;            
             //TODO: Get rid of LatencySampleCount!
             SoundOutput.LatencySampleCount = 3 * (SoundOutput.SamplesPerSecond / DEFINEDGameUpdateHz);
             //TODO: SafetyBytes sanity check - what is a good value here?
             SoundOutput.SafetyBytes = ((SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample) / DEFINEDGameUpdateHz) / 2;
-            SoundOutput.BufferSize = SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample;            
-            
             //TODO: move this to audio section, or leave here with memory allocs?
             int16_t *AllocatedAudioBufferMemory = (int16_t *)(VirtualAlloc(0, SoundOutput.BufferSize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE));
 
@@ -766,28 +855,25 @@ WinMain(HINSTANCE Instance,
             Win32ClearSoundBuffer(&SoundOutput);
             GlobalAudioBuffer->Play(0, 0, DSBPLAY_LOOPING);
 
-
-#if PROJECT21_INTERNAL
-            LPVOID BaseAddress = (LPVOID)Terabytes((uint64_t)2);
-#else   
-            LPVOID BaseAddress = 0;
-#endif
+            INTERNAL_win32_platform_state Platform = {};
             application_memory ApplicationMemory = {};
-            ApplicationMemory.INTERNAL_PlatformFreeFileMemory = INTERNAL_PlatformFreeFileMemory;
-            ApplicationMemory.INTERNAL_PlatformReadEntireFile = INTERNAL_PlatformReadEntireFile;
-            ApplicationMemory.INTERNAL_PlatformWriteEntireFile = INTERNAL_PlatformWriteEntireFile;
 
             ApplicationMemory.PermanentStorageSize = Megabytes(64);
             ApplicationMemory.TransientStorageSize = Gigabytes(1);
-            uint64_t TotalMemorySize = ApplicationMemory.PermanentStorageSize + ApplicationMemory.TransientStorageSize;
-            ApplicationMemory.PermanentStorage = VirtualAlloc(BaseAddress, TotalMemorySize, 
-                                                              MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+            Platform.ApplicationMemorySize = ApplicationMemory.PermanentStorageSize + ApplicationMemory.TransientStorageSize;
+            Platform.ApplicationMemoryBase = VirtualAlloc(PermanentStorageBaseAddress, Platform.ApplicationMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+            ApplicationMemory.PermanentStorage = Platform.ApplicationMemoryBase;
             ApplicationMemory.TransientStorage = ((uint8_t *)(ApplicationMemory.PermanentStorage) + ApplicationMemory.PermanentStorageSize); 
+
+#if PROJECT21_INTERNAL
+            ApplicationMemory.INTERNAL_PlatformFreeFileMemory = INTERNAL_PlatformFreeFileMemory;
+            ApplicationMemory.INTERNAL_PlatformReadEntireFile = INTERNAL_PlatformReadEntireFile;
+            ApplicationMemory.INTERNAL_PlatformWriteEntireFile = INTERNAL_PlatformWriteEntireFile;
+#endif
 
             if (AllocatedAudioBufferMemory && ApplicationMemory.PermanentStorage && ApplicationMemory.TransientStorage)
             {
                 GlobalRunning = true;
-                HDC DeviceContext = GetDC(Window);
                 LARGE_INTEGER LastPerformanceCounter = Win32GetWallClock();
                 LARGE_INTEGER FrameFlipWallClock = Win32GetWallClock();
 
@@ -826,7 +912,7 @@ WinMain(HINSTANCE Instance,
                         KeyboardThisFrame->Buttons[ButtonIndex].EndedDown = KeyboardLastFrame->Buttons[ButtonIndex].EndedDown;
                     }
 
-                    Win32ProcessWindowsMessages(KeyboardThisFrame);
+                    Win32ProcessWindowsMessages(&Platform, KeyboardThisFrame);
                     
 #if PROJECT21_INTERNAL
                     if (!GlobalPause)
@@ -892,21 +978,6 @@ WinMain(HINSTANCE Instance,
                                     NewControllerState->IsAnalog = false;
                                 }
 
-                                NewControllerState->LStickAverageX = (GP->wButtons & XINPUT_GAMEPAD_DPAD_LEFT)  ? -1.0f : NewControllerState->LStickAverageX;
-                                NewControllerState->LStickAverageX = (GP->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) ?  1.0f : NewControllerState->LStickAverageX;
-                                NewControllerState->LStickAverageY = (GP->wButtons & XINPUT_GAMEPAD_DPAD_UP)    ?  1.0f : NewControllerState->LStickAverageY;
-                                NewControllerState->LStickAverageY = (GP->wButtons & XINPUT_GAMEPAD_DPAD_DOWN)  ? -1.0f : NewControllerState->LStickAverageY;
-
-                                // Process digital buttons
-                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->Start,         XINPUT_GAMEPAD_START,          &NewControllerState->Start);
-                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->Back,          XINPUT_GAMEPAD_BACK,           &NewControllerState->Back);
-                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->LeftShoulder,  XINPUT_GAMEPAD_LEFT_SHOULDER,  &NewControllerState->LeftShoulder);
-                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->RightShoulder, XINPUT_GAMEPAD_RIGHT_SHOULDER, &NewControllerState->RightShoulder);
-                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->ActionDown,    XINPUT_GAMEPAD_A,              &NewControllerState->ActionDown);
-                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->ActionRight,   XINPUT_GAMEPAD_B,              &NewControllerState->ActionRight);
-                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->ActionLeft,    XINPUT_GAMEPAD_X,              &NewControllerState->ActionLeft);
-                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->ActionUp,      XINPUT_GAMEPAD_Y,              &NewControllerState->ActionUp);
-
                                 // Convert analog inputs to digital for left stick and triggers
                                 float32 AnalogToDigitalThreshold = 0.5f;
                                 Win32ProcessXInputButton((NewControllerState->LStickAverageX < -AnalogToDigitalThreshold) ? 1 : 0,
@@ -921,6 +992,16 @@ WinMain(HINSTANCE Instance,
                                                         &OldControllerState->LeftTrigger, 1, &NewControllerState->LeftTrigger);
                                 Win32ProcessXInputButton((NewControllerState->RTriggerAverage > AnalogToDigitalThreshold) ? 1 : 0,
                                                         &OldControllerState->RightTrigger, 1, &NewControllerState->RightTrigger);
+
+                                // Process digital buttons
+                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->Start,         XINPUT_GAMEPAD_START,          &NewControllerState->Start);
+                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->Back,          XINPUT_GAMEPAD_BACK,           &NewControllerState->Back);
+                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->LeftShoulder,  XINPUT_GAMEPAD_LEFT_SHOULDER,  &NewControllerState->LeftShoulder);
+                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->RightShoulder, XINPUT_GAMEPAD_RIGHT_SHOULDER, &NewControllerState->RightShoulder);
+                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->ActionDown,    XINPUT_GAMEPAD_A,              &NewControllerState->ActionDown);
+                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->ActionRight,   XINPUT_GAMEPAD_B,              &NewControllerState->ActionRight);
+                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->ActionLeft,    XINPUT_GAMEPAD_X,              &NewControllerState->ActionLeft);
+                                Win32ProcessXInputButton(GP->wButtons, &OldControllerState->ActionUp,      XINPUT_GAMEPAD_Y,              &NewControllerState->ActionUp);
                             }
                             else
                             {
@@ -934,30 +1015,28 @@ WinMain(HINSTANCE Instance,
                         ApplicationOffscreenBuffer.Width = GlobalBackbuffer.Width;
                         ApplicationOffscreenBuffer.Height = GlobalBackbuffer.Height;
                         ApplicationOffscreenBuffer.Pitch = GlobalBackbuffer.Pitch;
+                        ApplicationOffscreenBuffer.BytesPerPixel = GlobalBackbuffer.BytesPerPixel;
+                        
+#if PROJECT21_INTERNAL
+                        if(Platform.InputRecordingIndex)
+                        {
+                            Win32RecordInput(&Platform, InputThisFrame);
+                        }
+
+                        if(Platform.InputPlaybackIndex)
+                        {
+                            Win32PlaybackInput(&Platform, InputThisFrame);
+                        }
+#endif                        
                         Application.Update(&ApplicationMemory, &ApplicationOffscreenBuffer, InputThisFrame);
 
                         LARGE_INTEGER AudioWallClock = Win32GetWallClock();
                         float64 SecondsSinceFrameFlip = Win32GetSecondsElapsed(FrameFlipWallClock, AudioWallClock);
-
                         DWORD PlayCursor;
                         DWORD WriteCursor;
+
                         if(GlobalAudioBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor) == DS_OK)
                         {
-                        /*
-                        How Sound Output Works (we hope)
-
-                        We need a safety value that is the number of samples / ms we think the loop might vary by from frame to frame (e.g. 2ms)
-
-                        When we get to the point where we are ready to write audio, we look to see what the play cursor position is and we will
-                        forecast ahead where we think the play cursor will be on the next frame boundary.
-
-                        We will then look to see if the write cursor is before that point by at least the safety value. 
-                        If it is, the target fill position is that frame boundary plus one more frame, giving us perfect
-                        audio sync in the case of a card that has low enough latency.
-
-                        If the write cursor is _after_ the next fram boundary, then we assume we can never sync the audio perfectly,
-                        so we will write one frame's worth of audio plus the safety value.
-                        */
                             if(!SoundIsValid)
                             {
                                 SoundOutput.SampleIndex = WriteCursor - SoundOutput.BytesPerSample;
@@ -1070,7 +1149,9 @@ WinMain(HINSTANCE Instance,
                         //NOTE: DEBUGAudioCursorIndex - 1 will be wrong on the 0'th Index but for internal testing, whatevs
                         INTERNAL_Win32DrawAudioSync(&GlobalBackbuffer, ArrayCount(DEBUGAudioCursors), DEBUGAudioCursors, DEBUGAudioCursorIndex - 1, &SoundOutput, SecondsElapsedForFrame);
     #endif
+                        HDC DeviceContext = GetDC(Window);
                         Win32CopyBackbufferToWindow(DeviceContext, Dim.Width, Dim.Height, &GlobalBackbuffer, 0, 0, Dim.Width, Dim.Height);
+                        ReleaseDC(Window, DeviceContext);
                         FrameFlipWallClock = Win32GetWallClock();
     #if PROJECT21_INTERNAL                    
                         {
