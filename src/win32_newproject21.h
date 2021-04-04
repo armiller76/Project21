@@ -27,7 +27,6 @@ struct win32_sound_output
     uint32_t BufferSize;
     uint32_t SafetyBytes;
     float32 tSine;
-    int32_t LatencySampleCount;
 };
 
 struct win32_application
@@ -43,10 +42,19 @@ struct win32_application
     bool32 Valid;
 };
 
+struct win32_replay_buffer
+{
+    HANDLE FileHandle;
+    HANDLE MemoryMapHandle;
+    char ReplayFileName[WIN32_FILENAME_MAX_COUNT];
+    void *Memory;
+};
+
 struct win32_platform_state
 {
     void *ApplicationMemoryBase;
     uint64_t ApplicationTotalMemorySize;
+    win32_replay_buffer ReplayBuffers[4];
 
     HANDLE RecordingHandle;
     uint32_t InputRecordingIndex;

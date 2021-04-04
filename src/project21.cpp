@@ -28,21 +28,22 @@ ApplicationOutputSound(application_state *State, application_sound_output_buffer
 }
 
 internal void
-RenderPlayer(application_state *State, application_offscreen_buffer *BackBuffer, uint32_t Color)
+Render10x10Square(application_offscreen_buffer *BackBuffer, int32_t PlayerX, int32_t PlayerY, uint32_t Color)
 {
     uint8_t *EndOfBuffer = (uint8_t *)BackBuffer->Memory + BackBuffer->Pitch*BackBuffer->Height;
     
-    int32_t Top = State->PlayerY;
-    int32_t Bottom = State->PlayerY + 10;
-    for(int32_t X = State->PlayerX; X < State->PlayerX + 10; ++X)
+    int32_t Top = PlayerY;
+    int32_t Bottom = PlayerY + 10;
+    for(int32_t X = PlayerX; X < PlayerX + 10; ++X)
     {
         uint8_t *Pixel = (uint8_t *)BackBuffer->Memory + Top*BackBuffer->Pitch + X*BackBuffer->BytesPerPixel;
         for(int32_t Y = Top; Y < Bottom; ++Y)
         {
-            if((Pixel >= BackBuffer->Memory) && (Pixel < EndOfBuffer))
+            if((Pixel >= BackBuffer->Memory) && ((Pixel + 4) < EndOfBuffer))
             {
                 *(uint32_t *)Pixel = Color;
             }
+            
             Pixel += BackBuffer->Pitch;
         }
     }
@@ -80,11 +81,11 @@ extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, a
 
 #if 1 // file IO testing
         char *FileName = __FILE__;
-        internal_read_file_result File = Memory->INTERNAL_PlatformReadEntireFile(FileName);
+        internal_read_file_result File = Memory->INTERNAL_PlatformReadEntireFile(Thread, FileName);
         if(File.Contents)
         {
-            Memory->INTERNAL_PlatformWriteEntireFile("test.out", File.Size, File.Contents);
-            Memory->INTERNAL_PlatformFreeFileMemory(File.Contents);
+            Memory->INTERNAL_PlatformWriteEntireFile(Thread, "test.out", File.Size, File.Contents);
+            Memory->INTERNAL_PlatformFreeFileMemory(Thread, File.Contents);
         }
 #endif // file IO testing
         
@@ -125,7 +126,8 @@ extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, a
     }
 
     RenderGradient(Buffer, State->BlueOffset, State->GreenOffset);
-    RenderPlayer(State, Buffer, COLOR_MAGENTA);
+    Render10x10Square(Buffer, State->PlayerX, State->PlayerY, COLOR_MAGENTA);
+    Render10x10Square(Buffer, Input->MouseX, Input->MouseY, COLOR_YELLOW);
 }
 
 extern "C" APPLICATION_GET_SOUND(ApplicationGetSound) // parameters: (application_memory *Memory, application_sound_output_buffer *Buffer)

@@ -15,6 +15,7 @@
 /*************************************/
 //IMPORTANT take this out ASAP
 #define PROJECT21_INTERNAL 1 // for now, so VSC stops being a bitch
+#define PROJECT21_AUDIODEBUG 0 // set nonzero to enable drawing audio sync functions
 
 #include <math.h> // currenly only using sinf - can I do better / as well?
 #include <stdint.h>
@@ -61,6 +62,12 @@ SafeTruncateUInt64(uint64_t Value)
     return((uint32_t)Value);
 }
 
+struct thread_context
+{
+    int32_t PlaceHolder_;
+};
+
+
 /**************************************************************/
 /*Services that the platform layer provides to the application*/
 /**************************************************************/
@@ -72,13 +79,16 @@ struct internal_read_file_result
     void *Contents;
 };
 
-#define INTERNAL_PLATFORM_FREE_FILE_MEMORY(name) void name(void *Bitmapmemory)
+// IMPORTANT:
+// DO NOT USE outside of internal testing. NOT FOR SHIPPING!
+// these are blocking calls, and do not protect against lost data!
+#define INTERNAL_PLATFORM_FREE_FILE_MEMORY(name) void name(thread_context *Thread, void *Bitmapmemory)
 typedef INTERNAL_PLATFORM_FREE_FILE_MEMORY(INTERNAL_platform_free_file_memory);
 
-#define INTERNAL_PLATFORM_READ_ENTIRE_FILE(name) internal_read_file_result name(char *Filename)
+#define INTERNAL_PLATFORM_READ_ENTIRE_FILE(name) internal_read_file_result name(thread_context *Thread, char *Filename)
 typedef INTERNAL_PLATFORM_READ_ENTIRE_FILE(INTERNAL_platform_read_entire_file);
 
-#define INTERNAL_PLATFORM_WRITE_ENTIRE_FILE(name) bool32 name(char *Filename, uint32_t MemorySize, void *Memory)
+#define INTERNAL_PLATFORM_WRITE_ENTIRE_FILE(name) bool32 name(thread_context *Thread, char *Filename, uint32_t MemorySize, void *Memory)
 typedef INTERNAL_PLATFORM_WRITE_ENTIRE_FILE(INTERNAL_platform_write_entire_file);
 
 #endif
@@ -151,7 +161,12 @@ struct application_clocks
 
 struct application_input
 {
-    //TODO: add clocks here?
+    button_state MouseButtons[5];
+    int32_t MouseX;
+    int32_t MouseY;
+    int32_t MouseZ;
+    
+    //TODO: add clocks in here?
     application_input_device Controllers[5]; // Controller 0 = Keyboard, 1-4 = other XInput devices
 };
 inline application_input_device *GetController(application_input *Input, uint32_t ControllerIndex)
@@ -177,11 +192,10 @@ struct application_memory
     INTERNAL_platform_write_entire_file *INTERNAL_PlatformWriteEntireFile;
 };
 
-
-#define APPLICATION_UPDATE(name) void name(application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input)
+#define APPLICATION_UPDATE(name) void name(thread_context *Thread, application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input)
 typedef APPLICATION_UPDATE(application_update);
 
-#define APPLICATION_GET_SOUND(name) void name(application_memory *Memory, application_sound_output_buffer *Buffer)
+#define APPLICATION_GET_SOUND(name) void name(thread_context *Thread, application_memory *Memory, application_sound_output_buffer *Buffer)
 typedef APPLICATION_GET_SOUND(application_get_sound);
 
 // this does not need to be visible to Win32....
