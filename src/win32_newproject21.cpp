@@ -967,6 +967,7 @@ WinMain(HINSTANCE Instance,
                 application_input ApplicationInput[2] = {}; 
                 application_input *InputThisFrame = &ApplicationInput[0];
                 application_input *InputLastFrame = &ApplicationInput[1];
+                InputThisFrame->SecondsToConsumePerUpdate = TargetSecondsElapsedPerFrame;
 
                 DWORD AudioLatencyBytes = 0;
                 float32 AudioLatencySeconds = 0.0f;

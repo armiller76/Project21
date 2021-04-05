@@ -33,8 +33,8 @@
 #define COLOR_YELLOW    0xFFFFFF00
 #define COLOR_BLACK     0xFF000000
 
-#define PROJECT21_WINDOWWIDTH 1280
-#define PROJECT21_WINDOWHEIGHT 720
+#define PROJECT21_WINDOWWIDTH 960
+#define PROJECT21_WINDOWHEIGHT 540
 
 #define Pi32 3.14159265359f
 
@@ -153,21 +153,14 @@ struct application_input_device
     };
 };
 
-struct application_clocks
-{
-    //TODO: add clocks to application_input
-    float32 SecondsElapsed;
-};
-
 struct application_input
 {
+    application_input_device Controllers[5]; // Controller 0 = Keyboard, 1-4 = other XInput devices
     button_state MouseButtons[5];
     int32_t MouseX;
     int32_t MouseY;
     int32_t MouseZ;
-    
-    //TODO: add clocks in here?
-    application_input_device Controllers[5]; // Controller 0 = Keyboard, 1-4 = other XInput devices
+    float32 SecondsToConsumePerUpdate;
 };
 inline application_input_device *GetController(application_input *Input, uint32_t ControllerIndex)
 {
@@ -201,14 +194,6 @@ typedef APPLICATION_GET_SOUND(application_get_sound);
 // this does not need to be visible to Win32....
 struct application_state
 {
-    int32_t ToneHz;
-    float32 tSine;
-    int32_t BlueOffset;
-    int32_t GreenOffset;
-
-    int32_t PlayerX;
-    int32_t PlayerY;
-    float32 tAction;
 };
 
 #define PROJECT21_H

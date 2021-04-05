@@ -5,12 +5,12 @@ internal void
 ApplicationOutputSound(application_state *State, application_sound_output_buffer *SoundBuffer)
 {
     int16_t ToneVol = 256;
-    int32_t WavePeriod = SoundBuffer->SamplesPerSecond / State->ToneHz;
+    int32_t WavePeriod = SoundBuffer->SamplesPerSecond / 768;// 768 is ToneHz
     
     int16_t *SampleOut = SoundBuffer->Memory;
     for(int32_t SampleIndex = 0; SampleIndex < SoundBuffer->SampleCount; ++SampleIndex)
     {
-#if 1        
+#if 0        
         float32 SineValue = sinf(State->tSine);
         int16_t SampleValue = (int16_t)(SineValue * ToneVol);
 #else
@@ -19,34 +19,91 @@ ApplicationOutputSound(application_state *State, application_sound_output_buffer
         *SampleOut++ = SampleValue;
         *SampleOut++ = SampleValue;
         
+#if 0
         State->tSine += (2.0f*Pi32)/(float32)WavePeriod;
         if(State->tSine > (2.0f*Pi32))
         {
             State->tSine -= 2.0f*Pi32;
         }
+#endif
     }
 }
 
-internal void
-Render10x10Square(application_offscreen_buffer *BackBuffer, int32_t PlayerX, int32_t PlayerY, uint32_t Color)
+internal uint32_t
+RoundFloat32ToUint32(float32 FloatingPointIn)
 {
-    uint8_t *EndOfBuffer = (uint8_t *)BackBuffer->Memory + BackBuffer->Pitch*BackBuffer->Height;
-    
-    int32_t Top = PlayerY;
-    int32_t Bottom = PlayerY + 10;
-    for(int32_t X = PlayerX; X < PlayerX + 10; ++X)
+    return((uint32_t)(FloatingPointIn + 0.5f));
+}
+
+internal void
+DrawRectangle(application_offscreen_buffer *Buffer, float32 MinX, float32 MinY, float32 MaxX, float32 MaxY, uint32_t Color)
+{
+    int32_t IntMinX = RoundFloat32ToUint32(MinX);
+    int32_t IntMaxX = RoundFloat32ToUint32(MaxX);
+    int32_t IntMinY = RoundFloat32ToUint32(MinY);
+    int32_t IntMaxY = RoundFloat32ToUint32(MaxY);
+
+    if(IntMinX < 0)
     {
-        uint8_t *Pixel = (uint8_t *)BackBuffer->Memory + Top*BackBuffer->Pitch + X*BackBuffer->BytesPerPixel;
-        for(int32_t Y = Top; Y < Bottom; ++Y)
+        IntMinX = 0;
+    }
+    if(IntMinY < 0)
+    {
+        IntMinY = 0;
+    }
+    if(IntMaxX > Buffer->Width)
+    {
+        IntMaxX = Buffer->Width;
+    }
+    if(IntMaxY > Buffer->Height)
+    {
+        IntMaxY = Buffer->Height;
+    }
+
+    uint8_t *Row = (uint8_t *)Buffer->Memory + IntMinY*Buffer->Pitch + IntMinX*Buffer->BytesPerPixel;
+    for(int32_t Y = IntMinY; Y < IntMaxY; ++Y)
+    {
+        uint32_t *Pixel = (uint32_t *)Row;
+        for(int32_t X = IntMinX; X < IntMaxX; ++X)
         {
-            if((Pixel >= BackBuffer->Memory) && ((Pixel + 4) < EndOfBuffer))
-            {
-                *(uint32_t *)Pixel = Color;
-            }
+            *Pixel++ = Color;
+        }
             
-            Pixel += BackBuffer->Pitch;
+        Row += Buffer->Pitch;
+    }
+}
+
+extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input)
+{
+    Assert(sizeof(application_state) <= Memory->PermanentStorageSize);
+    
+    application_state *State = (application_state *)Memory->PermanentStorage;
+    if (!Memory->ApplicationIsInitialized)
+    {
+        Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
+    }
+
+    for(uint32_t ControllerIndex = 0; ControllerIndex < ArrayCount(Input->Controllers); ++ControllerIndex)
+    {
+        application_input_device *Controller = GetController(Input, ControllerIndex);
+        if(Controller->IsAnalog)
+        {
+            // Use analog movement tuning
+        }
+        else
+        {
+            // Use digital movement tuning
         }
     }
+
+    DrawRectangle(Buffer, 0.0f, 0.0f, (float32)Buffer->Width, (float32)Buffer->Height, COLOR_BLACK);
+    DrawRectangle(Buffer, 50.0f, 150.0f, 250.0f, 200.0f, COLOR_YELLOW);
+}
+
+extern "C" APPLICATION_GET_SOUND(ApplicationGetSound) // parameters: (application_memory *Memory, application_sound_output_buffer *Buffer)
+{
+    application_state *ApplicationState = (application_state *)Memory->PermanentStorage;
+    ApplicationOutputSound(ApplicationState, Buffer);
 }
 
 internal void
@@ -71,67 +128,3 @@ RenderGradient(application_offscreen_buffer *Buffer, int XOffset, int YOffset)
     }
 }
 
-extern "C" APPLICATION_UPDATE(ApplicationUpdate)//(application_memory *Memory, application_offscreen_buffer *Buffer, application_input *Input)
-{
-    Assert(sizeof(application_state) <= Memory->PermanentStorageSize);
-    
-    application_state *State = (application_state *)Memory->PermanentStorage;
-    if (!Memory->ApplicationIsInitialized)
-    {
-
-#if 1 // file IO testing
-        char *FileName = __FILE__;
-        internal_read_file_result File = Memory->INTERNAL_PlatformReadEntireFile(Thread, FileName);
-        if(File.Contents)
-        {
-            Memory->INTERNAL_PlatformWriteEntireFile(Thread, "test.out", File.Size, File.Contents);
-            Memory->INTERNAL_PlatformFreeFileMemory(Thread, File.Contents);
-        }
-#endif // file IO testing
-        
-        State->PlayerX = 100;
-        State->PlayerY = 100;
-        
-        State->ToneHz = 1024;
-        State->tSine = 0;
-        Memory->ApplicationIsInitialized = true; //TODO: Is this the right place to do this?
-    }
-
-    for(uint32_t ControllerIndex = 0;
-        ControllerIndex < ArrayCount(Input->Controllers);
-        ++ControllerIndex)
-    {
-        application_input_device *Controller = GetController(Input, ControllerIndex);
-        if(Controller->IsAnalog)
-        {
-            // Use analog movement tuning
-            State->ToneHz = 1024 + (int32_t)(128.0f*(Controller->LStickAverageY));
-        }
-        else
-        {
-            // Use digital movement tuning
-        }
-
-        State->PlayerX += (int32_t)(4.0f*Controller->LStickAverageX);
-        State->PlayerY -= (int32_t)(4.0f*Controller->LStickAverageY);
-        if(State->tAction > 0)
-        {
-             State->PlayerY += (int32_t)(5.0f*sinf(0.5f*Pi32*State->tAction));
-        }
-        if(Controller->ActionDown.EndedDown)
-        {
-            State->tAction = 4.0f;
-        }
-        State->tAction -= 0.033f;
-    }
-
-    RenderGradient(Buffer, State->BlueOffset, State->GreenOffset);
-    Render10x10Square(Buffer, State->PlayerX, State->PlayerY, COLOR_MAGENTA);
-    Render10x10Square(Buffer, Input->MouseX, Input->MouseY, COLOR_YELLOW);
-}
-
-extern "C" APPLICATION_GET_SOUND(ApplicationGetSound) // parameters: (application_memory *Memory, application_sound_output_buffer *Buffer)
-{
-    application_state *ApplicationState = (application_state *)Memory->PermanentStorage;
-    ApplicationOutputSound(ApplicationState, Buffer);
-}
